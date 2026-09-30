@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VOD Coach</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<aside id="sidebar">
+  <h1>VOD Coach</h1>
+  <label id="drop" tabindex="0">
+    <strong>Drop a VOD here</strong>
+    <span>or click to choose a file (.mp4, .mkv, .mov, .webm)</span>
+    <input id="file" type="file" accept=".mp4,.mkv,.mov,.webm,video/*" multiple hidden>
+  </label>
+  <div class="or">or</div>
+  <form id="url-form">
+    <input id="url" type="url" placeholder="Paste a YouTube link" autocomplete="off" required>
+    <button id="url-add">Add</button>
+  </form>
+  <div id="upload-status" hidden></div>
+  <ul id="library"></ul>
+</aside>
+
+<main id="main">
+  <section id="empty">
+    <h2>Nothing selected</h2>
+    <p>There are two ways to add a VOD, both on the left:</p>
+    <ol>
+      <li><b>Drop the video file</b> (.mp4 / .mkv / .mov / .webm) onto the dashed box. Best quality, and works offline.</li>
+      <li><b>Paste a YouTube link</b> and press Add. The video is downloaded for you first.</li>
+    </ol>
+    <p>Processing takes a while for long recordings. You can keep browsing other VODs meanwhile, and everything is saved to the library.</p>
+  </section>
+
+  <section id="processing" hidden>
+    <h2 id="p-name"></h2>
+    <p id="p-stage"></p>
+    <div class="bar"><div id="p-bar"></div></div>
+    <p id="p-error" class="error" hidden></p>
+    <button id="p-retry" hidden>Retry</button>
+  </section>
+
+  <section id="viewer" hidden>
+    <header id="v-head">
+      <h2 id="v-name" title="Click to rename"></h2>
+      <span id="v-meta"></span>
+      <button id="v-reprocess" class="ghost">Re-process</button>
+    </header>
+
+    <div id="now" class="dead">
+      <span class="pill game" id="now-game">GAME –</span>
+      <span class="pill roundno" id="now-round">ROUND –</span>
+      <span class="pill phase" id="now-phase">–</span>
+      <span id="now-time"></span>
+    </div>
+
+    <div id="layout">
+      <div id="left">
+        <div id="stage">
+          <video id="video" controls preload="metadata"></video>
+          <div id="caption" aria-live="polite"></div>
+        </div>
+
+        <div id="toolbar">
+          <button id="prev" title="Previous round ( [ )">&#9664; Round</button>
+          <button id="next" title="Next round ( ] )">Round &#9654;</button>
+          <label class="check"><input type="checkbox" id="skip" checked> Skip dead time</label>
+          <label>Speed
+            <select id="speed"><option>1</option><option>1.5</option><option>2</option><option>3</option></select>
+          </label>
+          <form id="goto">
+            <span>Go to</span>
+            <select id="g-game" title="Game"></select>
+            <label>round <input id="g-round" type="number" min="1" value="1"></label>
+            <label>+ <input id="g-off" value="1:00" size="5" title="mm:ss"></label>
+            <select id="g-into"><option value="live">into the live round</option><option value="pre">into pre-round</option></select>
+            <button>Go</button>
+          </form>
+        </div>
+
+        <div id="timeline-wrap">
+          <div id="tl-games"></div>
+          <div id="timeline"></div>
+          <div id="pauses"></div>
+          <div id="legend">
+            <span><i class="k pre"></i>Pre-round</span> <span><i class="k live"></i>Live round</span>
+            <span><i class="k post"></i>Post-plant</span> <span><i class="k end"></i>Round end</span>
+            <span><i class="k pause"></i>Timeout</span> <span><i class="k dead"></i>Dead time</span>
+          </div>
+        </div>
+
+        <aside id="transcript-card">
+          <h3>Transcript</h3>
+          <p>Speech-to-text and speaker labels aren't wired in yet. This is where they'll appear, synced to the video.</p>
+        </aside>
+      </div>
+
+      <aside id="right">
+        <div id="rounds-head">
+          <h3>Rounds</h3>
+          <label class="check"><input type="checkbox" id="follow" checked> Follow playback</label>
+        </div>
+        <div id="rounds"></div>
+      </aside>
+    </div>
+  </section>
+</main>
+<div id="tip" hidden></div>
+<script src="app.js"></script>
+</body>
+</html>

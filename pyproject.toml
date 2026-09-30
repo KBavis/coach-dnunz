@@ -1,0 +1,19 @@
+[project]
+name = "coach-dnunz"
+version = "0.1.0"
+description = "Local-first Valorant VOD breakdown tool for coaching"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "python-multipart",
+    "numpy",
+    "pillow",
+    "opencv-python-headless",
+    "rapidocr-onnxruntime",
+    "static-ffmpeg",
+    "yt-dlp",
+]
+
+[project.optional-dependencies]
+dev = ["playwright"]
