@@ -1,4 +1,5 @@
 .venv/
+.venv-windows/
 vods/
 data/
 __pycache__/

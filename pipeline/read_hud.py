@@ -64,16 +64,15 @@ def valid_timer(t):
     return parse_timer(t)[0] is not None or re.search(r"\d\.\d", t) is not None
 
 
-DATA = {}  # loaded once in the parent before forking; workers share it copy-on-write
-
-
 def to_int(s):
     digits = re.sub(r"\D", "", s or "")   # OCR sometimes adds stray dots, e.g. '.2'
     return int(digits) if digits else None
 
 
-def work(i):
-    timer, left, right = DATA["timer"][i], DATA["left"][i], DATA["right"][i]
+def work(item):
+    # crops travel with each task (tiny next to the OCR cost), so this works with both
+    # fork (Linux) and spawn (Windows) worker pools without each worker loading the whole file
+    i, timer, left, right = item
     spike = is_spike(timer)
     raw = None if spike else read_text(timer, valid_timer)
     t, dec = parse_timer(raw)
@@ -88,17 +87,16 @@ def main(npz, out, workers=6, on_progress=None):
     """Results are appended to `out` (JSON lines) as they finish; reruns resume."""
     d = np.load(npz)
     fps = float(d["fps"])
-    for k in ("timer", "left", "right"):
-        DATA[k] = d[k]          # decompress each array exactly once
+    timer, left, right = d["timer"], d["left"], d["right"]   # decompress each array exactly once
     done = set()
     try:
         done = {json.loads(l)["i"] for l in open(out)}
     except FileNotFoundError:
         pass
-    idx = [i for i in range(0, len(DATA["timer"]), STEP) if i not in done]
+    idx = [i for i in range(0, len(timer), STEP) if i not in done]
     print("todo", len(idx), "already done", len(done), flush=True)
     with Pool(workers) as p, open(out, "a") as f:
-        for n, r in enumerate(p.imap_unordered(work, idx, chunksize=8)):
+        for n, r in enumerate(p.imap_unordered(work, ((i, timer[i], left[i], right[i]) for i in idx), chunksize=8)):
             r["t"] = r["i"] / fps
             f.write(json.dumps(r) + "\n")
             if n % 50 == 0:

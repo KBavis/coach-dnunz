@@ -1,9 +1,7 @@
 """Background processing: one VOD at a time, each in an isolated, memory-guarded subprocess."""
-import json, os, queue, subprocess, sys, threading, time
-from pathlib import Path
+import json, os, queue, re, subprocess, sys, threading, time
 
-import re
-
+import psutil
 import static_ffmpeg
 
 from . import db
@@ -11,6 +9,9 @@ from . import db
 static_ffmpeg.add_paths()   # puts ffmpeg/ffprobe on PATH for yt-dlp and the pipeline
 
 ROOT = db.ROOT
+# subprocesses see the venv's tools (deno, which yt-dlp needs for YouTube) and speak UTF-8 on Windows too
+ENV = dict(os.environ, PYTHONPATH=str(ROOT), PYTHONUTF8="1",
+           PATH=os.pathsep.join([os.path.dirname(sys.executable), os.environ.get("PATH", "")]))
 _q: "queue.Queue[str]" = queue.Queue()
 _started = False
 
@@ -41,10 +42,11 @@ def video_path(vod_id):
 def _download(vod_id, url):
     """Fetch a YouTube video with yt-dlp into the VOD's folder. Returns an error string or None."""
     work = work_dir(vod_id)
-    yt = [sys.executable, "-m", "yt_dlp", "--js-runtimes", "node", "--no-playlist"]
+    yt = [sys.executable, "-m", "yt_dlp", "--no-playlist"]
+    text = dict(text=True, encoding="utf-8", errors="replace", env=ENV)
     _update(vod_id, stage="Contacting YouTube", pct=0)
     try:
-        t = subprocess.run(yt + ["--print", "title", url], capture_output=True, text=True, timeout=120)
+        t = subprocess.run(yt + ["--print", "title", url], capture_output=True, timeout=120, **text)
     except subprocess.TimeoutExpired:
         return "YouTube did not respond in time"
     if t.returncode != 0:
@@ -57,7 +59,7 @@ def _download(vod_id, url):
     proc = subprocess.Popen(
         yt + ["--newline", "--progress-template", "download:%(progress._percent_str)s", "-f", FORMAT,
               "--merge-output-format", "mp4", "-o", str(work / "source.%(ext)s"), url],
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, stdin=subprocess.DEVNULL)
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, **text)
     tail = []
     for line in proc.stdout:
         tail = (tail + [line.strip()])[-4:]
@@ -68,6 +70,26 @@ def _download(vod_id, url):
     if proc.returncode != 0 or video_path(vod_id) is None:
         return "download failed: " + " | ".join(x for x in tail if x)
     return None
+
+
+def _min_free_mb():
+    """Kill the job below this much free memory: MIN_MB if set, else 4 GB (less on small machines)."""
+    if "MIN_MB" in os.environ:
+        return int(os.environ["MIN_MB"])
+    return min(4000, psutil.virtual_memory().total // 2**20 // 10)
+
+
+def _kill_tree(pid):
+    try:
+        parent = psutil.Process(pid)
+        procs = parent.children(recursive=True) + [parent]
+    except psutil.NoSuchProcess:
+        return
+    for p in procs:
+        try:
+            p.kill()
+        except psutil.NoSuchProcess:
+            pass
 
 
 def _run(vod_id):
@@ -85,24 +107,36 @@ def _run(vod_id):
     video = video_path(vod_id)
     _update(vod_id, stage="Starting", pct=0)
     log = open(work / "run.log", "ab")
-    env = dict(os.environ, PYTHONPATH=str(ROOT))
     proc = subprocess.Popen(
-        [str(ROOT / "pipeline" / "run_guarded.sh"), sys.executable, "-m", "pipeline.run", str(video), str(work)],
-        cwd=ROOT, env=env, stdout=log, stderr=log, stdin=subprocess.DEVNULL)
+        [sys.executable, "-m", "pipeline.run", str(video), str(work)],
+        cwd=ROOT, env=ENV, stdout=log, stderr=log, stdin=subprocess.DEVNULL)
+    min_mb, oom, tick = _min_free_mb(), False, 0
     while proc.poll() is None:
-        try:
-            p = json.loads((work / "progress.json").read_text())
-            _update(vod_id, stage=p["stage"], pct=p["pct"])
-        except (FileNotFoundError, ValueError):
-            pass
-        time.sleep(1)
+        # memory guard: a runaway job gets killed (with its OCR workers) before it can freeze the machine
+        free = psutil.virtual_memory().available // 2**20
+        if free < min_mb:
+            log.write(f"WATCHDOG: available memory {free}MB < {min_mb}MB, killing job\n".encode())
+            log.flush()
+            _kill_tree(proc.pid)
+            oom = True
+            proc.wait()
+            break
+        if tick % 2 == 0:
+            try:
+                p = json.loads((work / "progress.json").read_text())
+                _update(vod_id, stage=p["stage"], pct=p["pct"])
+            except (FileNotFoundError, ValueError):
+                pass
+        tick += 1
+        time.sleep(0.5)
+    log.close()
     seg = work / "segments.json"
     if proc.returncode == 0 and seg.exists():
         _update(vod_id, status="ready", stage="Done", pct=100,
                 duration=json.loads(seg.read_text()).get("duration", 0))
     else:
         tail = (work / "run.log").read_text(errors="replace").strip().splitlines()[-3:]
-        why = "stopped by the memory guard" if proc.returncode == 137 else f"exit code {proc.returncode}"
+        why = "stopped by the memory guard" if oom else f"exit code {proc.returncode}"
         _update(vod_id, status="failed", error=f"{why}: " + " | ".join(tail))
 
 

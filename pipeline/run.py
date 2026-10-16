@@ -46,7 +46,7 @@ def main(video, work):
     # stage 2: read timer / scores (25-95%)
     readings = work / "readings.jsonl"
     progress(work, "Reading the HUD", 25)
-    read_hud.main(str(npz), str(readings), int(os.environ.get("COACH_WORKERS", "6")),
+    read_hud.main(str(npz), str(readings), int(os.environ.get("COACH_WORKERS", max(1, min(6, (os.cpu_count() or 2) - 1)))),
                   on_progress=lambda n, total: progress(work, "Reading the HUD", 25 + 70 * n / max(total, 1)))
 
     # stage 3: turn readings into segments

@@ -2,7 +2,7 @@
 name = "coach-dnunz"
 version = "0.1.0"
 description = "Local-first Valorant VOD breakdown tool for coaching"
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.13"   # rapidocr-onnxruntime has no 3.13 build
 dependencies = [
     "fastapi",
     "uvicorn[standard]",
@@ -11,8 +11,10 @@ dependencies = [
     "pillow",
     "opencv-python-headless",
     "rapidocr-onnxruntime",
-    "static-ffmpeg",
-    "yt-dlp",
+    "static-ffmpeg",                # downloads ffmpeg/ffprobe on first use, on any OS
+    "yt-dlp[default]",
+    "deno",                         # JavaScript runtime yt-dlp needs for YouTube; no separate install
+    "psutil",
 ]
 
 [project.optional-dependencies]

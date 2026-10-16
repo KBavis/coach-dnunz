@@ -37,8 +37,22 @@ Not done yet:
 
 ## Run
 
-    uv venv && uv pip install -e .
-    uv run uvicorn app.main:app --port 8000      # then open http://localhost:8000
+One step, no setup. The first start downloads everything it needs (Python, libraries, ffmpeg),
+which takes a few minutes. Later starts take seconds.
+
+- **Windows:** double-click `start.bat`.
+- **WSL, Linux or macOS:** run `./start.sh` in a terminal.
+
+Your browser opens on the app. Keep the window that opened alongside it running while you use
+the app, and close it to stop. Nothing needs to be installed beforehand: the script installs
+[uv](https://docs.astral.sh/uv/), which brings the right Python version and every dependency
+with it. If port 8000 is busy, the app picks the next free port.
+
+If Windows says the OCR engine could not load, install the
+[Microsoft Visual C++ Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe) and
+start it again.
+
+For developers: `uv run python launch.py --no-browser`, or `uv run uvicorn app.main:app --port 8000`.
 
 Drag a recording onto the page, or paste a YouTube link. Detection runs in the background and
 the VOD stays in your library afterwards; click a name's pencil to rename it.
