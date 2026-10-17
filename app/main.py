@@ -13,6 +13,16 @@ from pydantic import BaseModel
 from . import db, jobs, setup
 
 app = FastAPI(title="Coach dnunz")
+
+
+@app.middleware("http")
+async def _revalidate(request, call_next):
+    """Make browsers check for a newer page/script/stylesheet on every load (an unchanged file is
+    a quick 304), so an update never runs new HTML against a cached old app.js or style.css."""
+    response = await call_next(request)
+    if not request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
 STATIC = Path(__file__).parent / "static"
 ALLOWED = {".mp4", ".mkv", ".mov", ".webm"}
 YOUTUBE = re.compile(r"^https?://((www|m|music)\.)?(youtube\.com|youtu\.be)/", re.I)
