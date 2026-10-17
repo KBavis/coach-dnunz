@@ -123,6 +123,9 @@ async function refresh() {
   lastStatus = new Map(list.map((v) => [v.id, v.status]));
   vods = list;
   renderLibrary();
+  // the breakdown being viewed changed on the server (round results added, re-run finished)
+  const mine = current && list.find((v) => v.id === current.id);
+  if (view === "viewer" && mine?.status === "ready" && mine.updated && mine.updated !== current.updated) reloadCurrent();
 }
 
 function renderLibrary() {
@@ -532,20 +535,36 @@ async function openVod(id) {
   if (current?.id === d.id) return;
   current = d;
   document.title = `${d.name} · Coach dnunz`;
+  shownGame = null; playingGame = null;
+  useBreakdown(d);
+  const v = $("#video");
+  v.src = `/api/vods/${d.id}/video`;
+  v.playbackRate = speed;
+  update();
+}
+
+function useBreakdown(d) {
   const res = d.result;
   segs = [...res.segments].sort((a, b) => a.start - b.start);
   pauses = res.pauses || [];
   games = res.games;
   duration = res.duration || d.duration;
   rounds = buildRounds(res);
-  activeKey = undefined; activeRound = null; shownGame = null; playingGame = null;
+  activeKey = undefined; activeRound = null;
   $("#v-name").textContent = d.name;
   $("#v-meta").textContent = [fmt(duration), plural(games.length, "game"), plural(rounds.length, "round")].join(" · ");
-  const v = $("#video");
-  v.src = `/api/vods/${d.id}/video`;
-  v.playbackRate = speed;
-  showGame(games[0]?.game ?? null);
-  update();
+  showGame(games.some((g) => g.game === shownGame) ? shownGame : games[0]?.game ?? null);
+}
+
+let reloading = false;
+async function reloadCurrent() {
+  if (reloading) return;
+  reloading = true;
+  try {
+    const d = await api(`/api/vods/${current.id}`);
+    if (d.result && current?.id === d.id) { current = d; useBreakdown(d); update(); }
+  } catch (_) {}
+  reloading = false;
 }
 
 function buildRounds(result) {

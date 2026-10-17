@@ -88,7 +88,16 @@ def list_vods():
     con.close()
     for r in rows:
         r["summary"] = _summary(r["id"]) if r["status"] == "ready" else None
+        r["updated"] = _updated(r["id"])
     return rows
+
+
+def _updated(vod_id):
+    """When the breakdown last changed, so an open viewer notices background updates."""
+    try:
+        return (db.VODS / vod_id / "segments.json").stat().st_mtime
+    except FileNotFoundError:
+        return None
 
 
 @app.get("/api/vods/{vod_id}/thumb.jpg")
@@ -160,6 +169,7 @@ def detail(vod_id: str):
     vod = _row(con, vod_id)
     con.close()
     vod["result"] = _result(vod_id)
+    vod["updated"] = _updated(vod_id)
     return vod
 
 
