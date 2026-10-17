@@ -102,7 +102,7 @@ function showLibrary() {
   $("#library-view").hidden = false;
   const v = $("#video");
   if (!v.paused) v.pause();
-  document.title = "Coach dnunz";
+  document.title = "Coach Dnunz";
   renderLibrary();
 }
 
@@ -287,7 +287,7 @@ function startRename(v, target) {
     }
     input.replaceWith(target);
     target.textContent = v.name;
-    if (current?.id === v.id) { current.name = v.name; document.title = `${v.name} · Coach dnunz`; }
+    if (current?.id === v.id) { current.name = v.name; document.title = `${v.name} · Coach Dnunz`; }
     gridKey = ""; refresh();
   };
   input.addEventListener("keydown", (e) => {
@@ -558,7 +558,7 @@ async function openVod(id) {
   closeMenu();
   if (current?.id === d.id) return;
   current = d;
-  document.title = `${d.name} · Coach dnunz`;
+  document.title = `${d.name} · Coach Dnunz`;
   shownGame = null; playingGame = null;
   useBreakdown(d);
   const v = $("#video");

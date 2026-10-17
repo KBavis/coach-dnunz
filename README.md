@@ -1,4 +1,4 @@
-# Coach dnunz
+# Coach Dnunz
 
 A fun hobby project, built to help a friend who coaches Valorant.
 

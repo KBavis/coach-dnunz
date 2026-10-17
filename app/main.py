@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from . import db, jobs, setup
 
-app = FastAPI(title="Coach dnunz")
+app = FastAPI(title="Coach Dnunz")
 
 
 @app.middleware("http")

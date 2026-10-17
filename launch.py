@@ -1,4 +1,4 @@
-"""Start Coach dnunz and open it in the browser.
+"""Start Coach Dnunz and open it in the browser.
 
     uv run python launch.py [--no-browser]       (start.sh / start.bat do this for you)
 
@@ -16,7 +16,7 @@ def say(msg):
 
 
 def is_ours(port):
-    """True if Coach dnunz is already running on this port."""
+    """True if the app is already running on this port."""
     try:
         with urllib.request.urlopen(f"http://{HOST}:{port}/api/vods", timeout=1) as r:
             return r.status == 200
@@ -74,7 +74,7 @@ def main():
     sys.path.insert(0, str(ROOT))
     if is_ours(PREFERRED_PORT):
         url = f"http://localhost:{PREFERRED_PORT}"
-        say(f"Coach dnunz is already running at {url}")
+        say(f"Coach Dnunz is already running at {url}")
         if "--no-browser" not in sys.argv:
             open_browser(url)
         return
@@ -84,7 +84,7 @@ def main():
     import uvicorn
     if "--no-browser" not in sys.argv:
         threading.Thread(target=open_when_ready, args=(url, port), daemon=True).start()
-    say(f"Starting Coach dnunz at {url}")
+    say(f"Starting Coach Dnunz at {url}")
     say("Keep this window open while you use the app. Close it (or press Ctrl+C) to stop.")
     uvicorn.run("app.main:app", host=HOST, port=port, log_level="warning")
 
