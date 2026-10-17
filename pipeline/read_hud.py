@@ -157,9 +157,9 @@ def main(npz, out, workers=6, on_progress=None):
 
     Pass 1 reads every frame with templates. Pass 2 runs OCR only on frames near confident HUD
     readings that still miss a field, so dead time (menus, lobby, the stream intro) costs nothing."""
-    d = np.load(npz)
-    fps = float(d["fps"])
-    timer, left, right = d["timer"], d["left"], d["right"]   # decompress each array exactly once
+    with np.load(npz) as d:
+        fps = float(d["fps"])
+        timer, left, right = d["timer"], d["left"], d["right"]   # decompress each array exactly once
     done = set()
     try:
         done = {json.loads(l)["i"] for l in open(out)}

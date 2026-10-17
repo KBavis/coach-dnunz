@@ -24,8 +24,8 @@ _tmpl = None
 def templates():
     global _tmpl
     if _tmpl is None:
-        d = np.load(TEMPLATES)
-        _tmpl = {k: d[k] for k in d.files}
+        with np.load(TEMPLATES) as d:
+            _tmpl = {k: d[k] for k in d.files}
     return _tmpl
 
 
@@ -90,8 +90,8 @@ def score(a):
 
 def build(npz, readings, out=TEMPLATES):
     """Average glyphs from frames where OCR's reading has as many digits as blobs were found."""
-    d = np.load(npz)
-    d = {k: d[k] for k in ("timer", "left", "right")}      # decompress once, not per frame
+    with np.load(npz) as f:
+        d = {k: f[k] for k in ("timer", "left", "right")}  # decompress once, not per frame
     acc = {"timer": [[] for _ in range(10)], "score": [[] for _ in range(10)]}
     for line in open(readings):
         r = json.loads(line)

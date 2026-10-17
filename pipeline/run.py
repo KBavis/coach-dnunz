@@ -58,9 +58,9 @@ def main(video, work):
 
     # stage 4: round results from the WON / LOST banners (crops kept by the scan, in seconds)
     progress(work, "Reading round results", 97)
-    d = np.load(npz)
-    fps = float(d["fps"])
-    saved = {int(i / fps): c for i, c in zip(d["banner_idx"], d["banner"])} if "banner_idx" in d.files else None
+    with np.load(npz) as d:                # closed again before the npz is deleted (Windows refuses otherwise)
+        fps = float(d["fps"])
+        saved = {int(i / fps): c for i, c in zip(d["banner_idx"], d["banner"])} if "banner_idx" in d.files else None
     banner.add_results(video, result, saved=saved)
     (work / "segments.json.tmp").write_text(json.dumps(result))
     (work / "segments.json.tmp").replace(work / "segments.json")
