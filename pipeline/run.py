@@ -15,7 +15,7 @@ static_ffmpeg.add_paths()
 
 from pipeline import extract_hud, read_hud, segment  # noqa: E402
 
-FPS = 2
+FPS = 1           # HUD readings per second
 
 
 def progress(work, stage, pct, message=""):
@@ -36,18 +36,18 @@ def main(video, work):
     work.mkdir(parents=True, exist_ok=True)
     duration = probe_duration(video)
 
-    # stage 1: decode + crop the HUD strip (0-25%)
+    # stage 1: decode + crop the HUD strip (0-85%), by far the longest part
     npz = work / "hud.npz"
     if not npz.exists():
         progress(work, "Scanning video", 0)
-        extract_hud.main(str(video), str(npz), FPS,
-                         on_progress=lambda t: progress(work, "Scanning video", 25 * min(t / duration, 1)))
+        extract_hud.main(str(video), str(npz), FPS, gpu=os.environ.get("COACH_GPU", "1") != "0", duration=duration,
+                         on_progress=lambda t: progress(work, "Scanning video", 85 * min(t / duration, 1)))
 
-    # stage 2: read timer / scores (25-95%)
+    # stage 2: read timer / scores (85-95%)
     readings = work / "readings.jsonl"
-    progress(work, "Reading the HUD", 25)
+    progress(work, "Reading the HUD", 85)
     read_hud.main(str(npz), str(readings), int(os.environ.get("COACH_WORKERS", max(1, min(6, (os.cpu_count() or 2) - 1)))),
-                  on_progress=lambda n, total: progress(work, "Reading the HUD", 25 + 70 * n / max(total, 1)))
+                  on_progress=lambda n, total: progress(work, "Reading the HUD", 85 + 10 * n / max(total, 1)))
 
     # stage 3: turn readings into segments
     progress(work, "Building timeline", 95)

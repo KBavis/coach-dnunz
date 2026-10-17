@@ -10,7 +10,7 @@ import numpy as np
 
 from pipeline import digits
 
-STEP = 2  # use every 2nd cached frame (cache is 2 fps -> 1 fps readings)
+READ_FPS = 1   # readings per second of video; older caches were made at 2 fps
 _ocr = None
 
 
@@ -33,7 +33,20 @@ def variants(a):
     yield cv2.cvtColor(255 - mask, cv2.COLOR_GRAY2RGB)
 
 
-def read_text(a, valid):
+# where the digits sit inside each crop; recognising just this box needs no text-detection model
+DIGIT_BOX = {"timer": (slice(18, 60), slice(28, 112)), "score": (slice(8, 44), slice(10, 62))}
+
+
+def read_text(a, valid, box=None):
+    """With `box`, recognition-only on the digits (~20 ms) and nothing more: on the sample VOD,
+    full detect+recognise (~700 ms) never read a frame this had failed on. Without, the full OCR."""
+    if box:
+        for v in variants(a[DIGIT_BOX[box]]):
+            r, _ = ocr()(v, use_det=False, use_cls=False)
+            txt = "".join(x[0] for x in r or []).replace(" ", "")
+            if re.fullmatch(r"[\d:.]+", txt) and valid(txt):
+                return txt
+        return None
     for v in variants(a):
         r, _ = ocr()(v)
         if r:
@@ -129,12 +142,12 @@ def work(item):
     r, timer, left, right = item
     digit = lambda s: re.sub(r"\D", "", s) != "" and len(re.sub(r"\D", "", s)) <= 2
     if not r["spike"] and r["timer"] is None and not r["decimal"]:
-        r["timer_raw"] = read_text(timer, valid_timer)
+        r["timer_raw"] = read_text(timer, valid_timer, "timer")
         r["timer"], r["decimal"] = parse_timer(r["timer_raw"])
         r["ocr"] += 1
     for side, crop in (("score_l", left), ("score_r", right)):
         if r[side] is None:
-            r[side] = to_int(read_text(crop, digit))
+            r[side] = to_int(read_text(crop, digit, "score"))
             r["ocr"] += 1
     return r
 
@@ -152,14 +165,15 @@ def main(npz, out, workers=6, on_progress=None):
         done = {json.loads(l)["i"] for l in open(out)}
     except FileNotFoundError:
         pass
-    every = list(range(0, len(timer), STEP))
+    step = max(1, round(fps / READ_FPS))
+    every = list(range(0, len(timer), step))
     total = len(every)
     rs = {i: fast(i, timer[i], left[i], right[i]) for i in every if i not in done}
     seen = [i for i in every if i in rs and (rs[i]["spike"] or rs[i]["timer"] or rs[i]["decimal"]
                                             or rs[i]["score_l"] is not None or rs[i]["score_r"] is not None)]
     near = set()
     for i in seen:
-        near.update(range(i - CONTEXT * STEP, i + CONTEXT * STEP + 1, STEP))
+        near.update(range(i - CONTEXT * step, i + CONTEXT * step + 1, step))
     infer(rs, every)
     todo = [i for i in rs if i in near and needs_ocr(rs[i])]
     pending = set(todo)

@@ -1,9 +1,9 @@
 """Tiny SQLite library of VODs."""
-import sqlite3, time, uuid
+import os, sqlite3, time, uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-DATA = ROOT / "data"
+DATA = Path(os.environ.get("COACH_DATA", ROOT / "data"))   # library location; override for tests
 VODS = DATA / "vods"
 
 SCHEMA = """

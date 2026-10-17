@@ -29,9 +29,11 @@ Works today, on one sample stream:
 Not done yet:
 
 - **Transcription and speaker labels.** The panel in the viewer is a placeholder.
-- **Speed.** Reading the HUD now uses template matching first and OCR only as a fallback: about
-  4 minutes instead of 25 for a 1h45m VOD, with the same rounds and timeouts. Jobs still run one
-  at a time.
+- **Speed.** A 1h45m VOD takes about 2.5 minutes end to end on the dev machine (Ryzen 7800X3D +
+  NVIDIA GPU), down from about 30. Decoding the video is now most of it: the CPU and, when there
+  is one, an NVIDIA GPU decode chunks side by side. Digits are read by template matching, with a
+  fast recognition-only OCR fallback. Up to 3 YouTube downloads and 2 analyses run at once
+  (`COACH_DOWNLOADS`, `COACH_PARALLEL`; `COACH_GPU=0` turns the GPU off).
 - **Wider testing.** It has only been checked against one stream. It expects Valorant's default
   observer/spectator HUD at the top centre, and other layouts or resolutions may misread.
 

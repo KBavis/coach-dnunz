@@ -2,8 +2,13 @@
 
 Crops (1080p coordinates): round timer / spike icon, attacker score, defender score.
 Output: <out>.npz with arrays timer, left, right (uint8 RGB) and fps.
+
+Decoding is most of the work, so the video is cut into chunks that a CPU decoder and, when
+there is an NVIDIA GPU, a GPU decoder pull from a shared queue. Each keeps busy at its own speed:
+on the dev machine the GPU decodes about half as fast as the CPU while using ~10x less CPU, so
+together they finish sooner than either alone.
 """
-import subprocess, sys, shutil
+import queue, subprocess, sys, shutil, threading
 import numpy as np
 import static_ffmpeg
 
@@ -14,6 +19,8 @@ STRIP_X, STRIP_Y, STRIP_W, STRIP_H = 560, 0, 800, 110
 TIMER = (330, 8, 140, 87)   # x, y, w, h within strip
 LEFT = (230, 25, 70, 50)
 RIGHT = (505, 25, 70, 50)
+TO_1080 = "scale=1920:1080:flags=bicubic"           # any resolution -> 1080p coordinates
+CROP = f"crop={STRIP_W}:{STRIP_H}:{STRIP_X}:{STRIP_Y}"
 
 
 def sub(a, box):
@@ -21,32 +28,91 @@ def sub(a, box):
     return a[y:y + h, x:x + w]
 
 
-def main(video, out, fps=2, on_progress=None):
-    cmd = [shutil.which("ffmpeg"), "-v", "error", "-i", video,
-           "-vf", f"fps={fps},scale=1920:1080:flags=bicubic,crop={STRIP_W}:{STRIP_H}:{STRIP_X}:{STRIP_Y}",   # any resolution -> 1080p coordinates
-           "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
-    p = subprocess.Popen(cmd, stdout=subprocess.PIPE)
-    size = STRIP_W * STRIP_H * 3
-    timer, left, right = [], [], []
-    while True:
-        buf = p.stdout.read(size)
-        if len(buf) < size:
-            break
-        a = np.frombuffer(buf, np.uint8).reshape(STRIP_H, STRIP_W, 3)
-        timer.append(sub(a, TIMER).copy())
-        left.append(sub(a, LEFT).copy())
-        right.append(sub(a, RIGHT).copy())
-        if len(timer) % 200 == 0:
-            print(len(timer) / fps, "s", flush=True)
-            if on_progress:
-                on_progress(len(timer) / fps)
-    p.wait()
-    if not timer:
+CHUNK = 300            # seconds of video per work unit
+
+
+def command(video, fps, decoder="cpu", seconds=None, start=0):
+    ff = [shutil.which("ffmpeg"), "-v", "error", "-nostdin"]
+    if start:
+        ff += ["-ss", str(start)]
+    if decoder == "cuda":
+        # decode on the GPU, but only copy the frames fps= keeps (a few a second) back to memory
+        ff += ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"]
+        vf = f"fps={fps},hwdownload,format=nv12,{TO_1080},{CROP}"
+    else:
+        vf = f"fps={fps},{TO_1080},{CROP}"
+    if seconds:
+        ff += ["-t", str(seconds)]
+    return ff + ["-i", str(video), "-an", "-vf", vf, "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
+
+
+def gpu_decode_works(video):
+    """True if this machine can decode this video on an NVIDIA GPU (checked on its first 2 s)."""
+    try:
+        p = subprocess.run(command(video, 1, "cuda", seconds=2), capture_output=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return p.returncode == 0 and len(p.stdout) >= STRIP_W * STRIP_H * 3
+
+
+def main(video, out, fps=1, on_progress=None, gpu=True, duration=None):
+    """Decode `video` into HUD crops, chunk by chunk, on the CPU plus the GPU when it works."""
+    if duration is None:
+        raise ValueError("duration is needed to plan the chunks")
+    decoders = ["cpu"] + (["cuda"] if gpu and gpu_decode_works(video) else [])
+    print("decoders:", ", ".join(decoders), flush=True)
+    total = int(duration * fps) + 2
+    shapes = {k: (b[3], b[2], 3) for k, b in (("timer", TIMER), ("left", LEFT), ("right", RIGHT))}
+    arrs = {k: np.zeros((total, *s), np.uint8) for k, s in shapes.items()}   # chunks fill their own rows
+    chunks = queue.Queue()
+    for c0 in range(0, int(duration) + 1, CHUNK):
+        chunks.put(c0)
+    filled = [0] * total
+    done_s = [0.0]
+    lock = threading.Lock()
+
+    def decode(decoder):
+        size = STRIP_W * STRIP_H * 3
+        while True:
+            try:
+                c0 = chunks.get_nowait()
+            except queue.Empty:
+                return
+            row0, rows = int(c0 * fps), int(CHUNK * fps)
+            p = subprocess.Popen(command(video, fps, decoder, seconds=CHUNK, start=c0), stdout=subprocess.PIPE)
+            n = 0
+            while n < rows and row0 + n < total:
+                buf = p.stdout.read(size)
+                if len(buf) < size:
+                    break
+                a = np.frombuffer(buf, np.uint8).reshape(STRIP_H, STRIP_W, 3)
+                r = row0 + n
+                arrs["timer"][r], arrs["left"][r], arrs["right"][r] = sub(a, TIMER), sub(a, LEFT), sub(a, RIGHT)
+                filled[r] = 1
+                n += 1
+            p.stdout.close()
+            p.wait()
+            if p.returncode not in (0, None) and n == 0 and decoder == "cuda":
+                chunks.put(c0)                  # the GPU choked on this chunk: leave it to the CPU
+                print("GPU decoder stopped, CPU continues", flush=True)
+                return
+            with lock:
+                done_s[0] += n / fps
+                if on_progress:
+                    on_progress(min(done_s[0], duration))
+
+    threads = [threading.Thread(target=decode, args=(d,), daemon=True) for d in decoders]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    n = max((i + 1 for i, f in enumerate(filled) if f), default=0)
+    if not n:
         raise SystemExit("No video frames could be read from this file")
-    np.savez_compressed(out, timer=np.stack(timer), left=np.stack(left),
-                        right=np.stack(right), fps=fps)
-    print("frames:", len(timer))
+    np.savez(out, timer=arrs["timer"][:n], left=arrs["left"][:n], right=arrs["right"][:n], fps=fps)
+    print("frames:", n, "missing:", n - sum(filled[:n]), flush=True)
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2])
+    from pipeline.run import probe_duration
+    main(sys.argv[1], sys.argv[2], duration=probe_duration(sys.argv[1]))

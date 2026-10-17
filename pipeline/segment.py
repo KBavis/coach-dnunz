@@ -186,6 +186,7 @@ def build(rs):
 
 
 PAUSE_MIN = 5   # identical timer readings in a row (at 1 Hz) that count as a pause
+PAUSE_GAP = 6   # a few unreadable seconds inside a timeout do not split it in two
 
 
 def find_pauses(rs):
@@ -197,7 +198,7 @@ def find_pauses(rs):
             j += 1
         if rs[k]["s"] is not None and j - k + 1 >= PAUSE_MIN:
             p = dict(start=rs[k]["t"], end=rs[j]["t"], timer=rs[k]["timer"])
-            if out and out[-1]["timer"] == p["timer"] and p["start"] - out[-1]["end"] <= 4:
+            if out and out[-1]["timer"] == p["timer"] and p["start"] - out[-1]["end"] <= PAUSE_GAP:
                 out[-1]["end"] = p["end"]         # one pause interrupted by an OCR miss
             else:
                 out.append(p)
