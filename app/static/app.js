@@ -74,7 +74,8 @@ window.addEventListener("hashchange", () => closeMenu());
 /* ---------- state ---------- */
 let vods = [];
 const uploads = new Map();   // key -> {name, pct, error}
-const finished = new Set();  // ids that became ready while this page was open
+const finished = new Set();  // ids that just became ready: shown as "Ready" in the queue for a moment
+const READY_SHOWN_MS = 6000;
 let config = { parallel: 2, downloads: 3 };
 let view = "library";
 
@@ -116,6 +117,7 @@ async function refresh() {
       const was = lastStatus.get(v.id);
       if (v.status === "ready" && (was === "processing" || was === "queued")) {
         finished.add(v.id);
+        setTimeout(() => { finished.delete(v.id); jobsKey = ""; renderLibrary(); }, READY_SHOWN_MS);
         toast(`"${v.name}" is ready to view`, false, { label: "Open", fn: () => { location.hash = `#/vod/${v.id}`; } });
       }
     }
@@ -155,19 +157,25 @@ const STEPS = { youtube: ["Download", "Scan video", "Find rounds", "Results"], f
 const clamp = (x) => Math.max(0, Math.min(100, x));
 function stepOf(j) {
   const st = j.stage || "";
-  if (j.upload) return { i: 0, pct: j.pct, text: "Copying the file into the app" };
-  if (j.status === "queued") return toDownload(j) ? { i: 0, wait: true, text: "Waiting for a download slot" } : { i: 1, wait: true };
+  if (j.upload) return { i: 0, pct: j.pct, label: "Copying in" };
+  if (j.status === "queued") return toDownload(j) ? { i: 0, wait: true, label: "Waiting to download" } : { i: 1, wait: true };
   if (DOWNLOADING.test(st) || /contacting/i.test(st)) {
-    const details = st.split(" · ").slice(1).join(" · ");
-    return { i: 0, pct: /joining/i.test(st) ? 100 : clamp(j.pct), text: /contacting/i.test(st) ? "Contacting YouTube"
-      : /joining/i.test(st) ? "Joining video and audio" : `Downloading${/audio/i.test(st) ? " audio" : ""}${details ? ` · ${details}` : ""}` };
+    const parts = st.split(" · ").slice(1);                  // ["2.1 of 6.8 GB", "13 MB/s", "6 min left"]
+    const size = parts.find((x) => / of /.test(x)) || "";
+    return { i: 0, pct: /joining/i.test(st) ? 100 : clamp(j.pct),
+      label: /contacting/i.test(st) ? "Contacting YouTube" : /joining/i.test(st) ? "Joining video and audio" : /audio/i.test(st) ? "Downloading audio" : "Downloading",
+      detail: parts.filter((x) => x !== size).reverse().join(" · "), tip: size };
   }
-  if (/round results|building/i.test(st)) return { i: 3, pct: clamp(((j.pct - 95) / 5) * 100), text: "Building the round list and reading round results" };
-  if (/reading the hud/i.test(st)) return { i: 2, pct: clamp(((j.pct - 85) / 10) * 100), text: "Reading the timer and score in each frame" };
-  return { i: 1, pct: clamp((j.pct / 85) * 100), text: `Scanning the video${/gpu/i.test(st) ? " (GPU)" : ""}` };
+  if (/round results|building/i.test(st)) return { i: 3, pct: clamp(((j.pct - 95) / 5) * 100), label: "Reading round results" };
+  if (/reading the hud/i.test(st)) return { i: 2, pct: clamp(((j.pct - 85) / 10) * 100), label: "Finding rounds" };
+  return { i: 1, pct: clamp((j.pct / 85) * 100), label: "Scanning video" };
 }
-const stepper = (steps, i, wait) => el("ol", { class: "stepper" }, ...steps.map((label, k) =>
-  el("li", { class: k < i ? "done" : k === i ? (wait ? "next" : "on") : "" }, label)));
+
+// one bar, one segment per step: done steps full, the current one filling, the rest empty
+const segbar = (steps, st) => el("div", { class: "segbar" + (st.wait ? " waiting" : ""),
+  title: steps.map((name, k) => `${k < st.i ? "✓" : k === st.i ? "▸" : "·"} ${name}`).join("   ") },
+  ...steps.map((_, k) => el("span", { class: k < st.i ? "done" : k === st.i ? "on" : "" },
+    el("i", { style: `width:${k < st.i ? 100 : k === st.i && !st.wait ? st.pct : 0}%` }))));
 
 let jobsKey = "";
 function renderJobs() {
@@ -185,54 +193,58 @@ function renderJobs() {
   jobsKey = key;
   const any = active.length + failed.length + done.length;
   $("#jobs-wrap").hidden = !any;
-  $("#clear-done").hidden = !done.length;
   const running = server.filter((v) => v.status === "processing" && !DOWNLOADING.test(v.stage)).length;
   const dl = server.filter((v) => v.status === "processing" && DOWNLOADING.test(v.stage)).length;
   $("#jobs-title").textContent = active.length ? "Processing queue" : failed.length ? "Needs attention" : "Just finished";
   $("#jobs-note").textContent = active.length
     ? [running && `${running} processing`, dl && `${dl} downloading`, waiting.length && `${waiting.length} waiting`, ups.length && `${ups.length} uploading`]
-      .filter(Boolean).join(" · ") + ` · in the order added, ${config.parallel} at a time`
+      .filter(Boolean).join(" · ")
     : "";
 
   let n = 0;
-  const row = (j, num, cls, stage, right, pct, bar, steps = null) => el("div", { class: `qrow ${cls}` },
+  const cancel = (j) => (j.upload || !["processing", "queued"].includes(j.status) ? el("span")
+    : el("button", { class: "icon q-cancel", title: "Cancel and remove", onclick: () => removeVod(j) }, "✕"));
+  // finished / failed rows: name, one line of text, an action
+  const row = (j, num, cls, stage, right) => el("div", { class: `qrow ${cls}` },
     el("span", { class: "q-num" }, num),
     el("div", { class: "q-main" },
       el("div", { class: "q-name", title: j.name }, j.name),
-      steps,
-      el("div", { class: "q-stage", title: stage }, stage),
-      bar ? el("div", { class: "bar" + (pct == null ? " wait" : "") }, el("div", { style: `width:${pct || 0}%` })) : null),
-    el("div", { class: "q-right" }, right),
-    j.upload || !["processing", "queued"].includes(j.status) ? el("span") : el("button", {
-      class: "icon q-cancel", title: "Cancel and remove", onclick: () => removeVod(j) }, "✕"));
+      el("div", { class: "q-stage", title: stage }, stage)),
+    el("div", { class: "q-right" }, right), cancel(j));
 
   $("#jobs").replaceChildren(
     ...active.map((j) => {
       n++;
-      if (j.upload && j.error) return row(j, "!", "failed", j.error, "", null, false);
+      if (j.upload && j.error) return row(j, "!", "failed", j.error, "");
       const steps = STEPS[j.source_url ? "youtube" : "file"];
       const st = stepOf(j);
-      const where = `Step ${st.i + 1} of ${steps.length}`;
+      let label = st.label, detail = [`${Math.round(st.pct)}%`, st.detail].filter(Boolean).join(" · "), right = "";
       if (st.wait) {
-        let text = st.text;
-        if (!text) {
+        if (!label) {
           const ahead = waiting.indexOf(j);
-          text = ahead <= 0 ? "Up next, starts when a slot frees up" : `Waiting, ${plural(ahead, "VOD")} ahead`;
+          label = ahead <= 0 ? "Up next" : `Waiting · ${plural(ahead, "VOD")} ahead`;
         }
-        return row(j, `#${n}`, "waiting", `${where} · ${text}`,
-          el("span", { class: "tag" }, /up next/i.test(text) ? "Up next" : "Queued"), null, false, stepper(steps, st.i, true));
+        right = el("span", { class: "tag" }, /up next/i.test(label) ? "Up next" : "Queued");
+        detail = "";
       }
-      const cls = st.i === 0 && !j.upload ? "downloading" : "running";
-      return row(j, `#${n}`, cls, `${where} · ${st.text}`, `${Math.round(st.pct)}%`, st.pct, true, stepper(steps, st.i, false));
+      const cls = st.wait ? "waiting" : st.i === 0 && !j.upload ? "downloading" : "running";
+      return el("div", { class: `qrow ${cls}` },
+        el("span", { class: "q-num" }, `#${n}`),
+        el("div", { class: "q-main" },
+          el("div", { class: "q-name", title: j.name }, j.name),
+          segbar(steps, st),
+          el("div", { class: "q-cap" },
+            el("span", {}, el("b", {}, label), el("span", { class: "q-step" }, ` · step ${st.i + 1} of ${steps.length}`)),
+            el("span", { class: "q-detail", title: st.tip || "" }, detail))),
+        el("div", { class: "q-right" }, right), cancel(j));
     }),
     ...failed.map((j) => row(j, "!", "failed", j.error || "Processing failed", el("span", { class: "q-actions" },
       el("button", { onclick: () => reprocess(j) }, "Retry"),
-      el("button", { class: "danger", onclick: () => removeVod(j) }, "Remove")), null, false)),
+      el("button", { class: "danger", onclick: () => removeVod(j) }, "Remove")))),
     ...done.map((j) => row(j, "✓", "done", j.summary && !j.summary.games ? "Ready — but no Valorant games were found"
       : `Ready — ${j.summary ? `${plural(j.summary.games, "game")}, ${plural(j.summary.rounds, "round")}` : "breakdown finished"}`,
-      el("button", { class: "primary", onclick: () => { location.hash = `#/vod/${j.id}`; } }, "Open"), null, false)));
+      el("button", { class: "primary", onclick: () => { location.hash = `#/vod/${j.id}`; } }, "Open"))));
 }
-$("#clear-done").onclick = () => { finished.clear(); jobsKey = ""; renderLibrary(); };
 
 function sortVods(list) {
   const by = $("#sort").value;

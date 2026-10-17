@@ -83,17 +83,16 @@ kbd { font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; padding: 1px 5p
 .qrow .bar { max-width: 520px; }
 .qrow.downloading .bar > div { background: var(--pre); }
 .q-right { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; }
-/* the four steps every VOD goes through */
-.stepper { list-style: none; display: flex; flex-wrap: wrap; gap: 4px 6px; margin: 5px 0 3px; padding: 0; font-size: 12px; }
-.stepper li { display: inline-flex; align-items: center; gap: 6px; color: var(--faint); }
-.stepper li + li::before { content: ""; order: -2; width: 14px; height: 1px; background: var(--line2); margin-right: 2px; }
-.stepper li::after { content: ""; order: -1; width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--line2); box-sizing: border-box; }
-.stepper li.done { color: var(--muted); }
-.stepper li.done::after { background: var(--win); border-color: var(--win); }
-.stepper li.on { color: var(--text); font-weight: 600; }
-.stepper li.on::after { border-color: var(--accent); background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
-.stepper li.next { color: var(--muted); }
-.stepper li.next::after { border-color: var(--post); }
+/* one bar per VOD, a segment per step */
+.segbar { display: flex; gap: 3px; margin: 7px 0 5px; max-width: 560px; }
+.segbar span { flex: 1; height: 5px; border-radius: 99px; background: var(--panel3); overflow: hidden; }
+.segbar i { display: block; height: 100%; background: var(--accent); border-radius: 99px; transition: width .6s; }
+.segbar span.done i { background: color-mix(in srgb, var(--accent) 55%, var(--panel3)); }
+.segbar.waiting span.on { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--post) 55%, transparent); }
+.q-cap { display: flex; gap: 12px; justify-content: space-between; max-width: 560px; font-size: 12.5px; color: var(--muted); }
+.q-cap b { color: var(--text); font-weight: 600; }
+.q-step { color: var(--faint); }
+.q-detail { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .q-actions { display: inline-flex; gap: 6px; }
 .q-cancel { font-size: 13px; opacity: .55; }
 .qrow:hover .q-cancel { opacity: 1; }
