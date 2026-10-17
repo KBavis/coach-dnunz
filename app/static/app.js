@@ -507,10 +507,15 @@ const dur = (sec) => {                         // a length, written so it never 
 };
 const SPIKE_SVG = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.6 13.6 4.8v6.4L8 14.4 2.4 11.2V4.8z" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="8" cy="8" r="2.1" fill="currentColor"/></svg>';
 const spikeIcon = () => { const i = el("span", { class: "spike-ico" }); i.innerHTML = SPIKE_SVG; return i; };
-let ourSide = "l";
 const known = (sc) => sc && sc[0] != null && sc[1] != null;
-const oursFirst = (sc) => (ourSide === "l" ? sc : [sc[1], sc[0]]);
-const resultOf = (r) => (r.winner ? (r.winner === ourSide ? "w" : "l") : null);
+// which HUD side is the team being watched: detected per game from the WON / LOST banners
+const sideOf = (game) => games.find((g) => g.game === game)?.our_side || null;
+const oursFirst = (sc, game) => (sideOf(game) === "r" ? [sc[1], sc[0]] : sc);
+function resultOf(r) {
+  const side = sideOf(r.game);
+  if (r.winner && side) return r.winner === side ? "w" : "l";     // the score change, when it was read
+  return r.banner === "win" ? "w" : r.banner === "loss" ? "l" : null;   // else that round's banner
+}
 
 async function openVod(id) {
   let d;
@@ -534,8 +539,6 @@ async function openVod(id) {
   duration = res.duration || d.duration;
   rounds = buildRounds(res);
   activeKey = undefined; activeRound = null; shownGame = null; playingGame = null;
-  ourSide = d.our_side === "r" ? "r" : "l";
-  renderSide();
   $("#v-name").textContent = d.name;
   $("#v-meta").textContent = [fmt(duration), plural(games.length, "game"), plural(rounds.length, "round")].join(" · ");
   const v = $("#video");
@@ -563,6 +566,7 @@ function buildRounds(result) {
     // not have settled on the HUD yet
     r.score = (r.live || r.post || first).score;
     r.timeouts = pauses.filter((p) => p.start < r.finish && p.end > r.start);
+    r.banner = (r.end || first).result ?? first.result ?? null;
     return r;
   }).sort((a, b) => a.start - b.start);
   // who took the round: the side whose score is one higher when the next round starts
@@ -578,7 +582,7 @@ function buildRounds(result) {
   return list;
 }
 
-const scoreText = (sc) => (known(sc) ? oursFirst(sc).join("–") : "");   // ours first
+const scoreText = (sc, game) => (known(sc) ? oursFirst(sc, game).join("–") : "");   // ours first when known
 
 /* rounds panel */
 function showGame(g) {
@@ -600,9 +604,10 @@ function showGame(g) {
 
 function roundRow(r) {
   const res = resultOf(r);
+  const order = sideOf(r.game) ? "your team first" : "left team first";
   const sc = r.after
-    ? el("span", { class: "sc", title: "Score after the round, your team first" }, scoreText(r.after))
-    : el("span", { class: "sc faint", title: "Score going into the round, your team first (its result was not read)" }, scoreText(r.score));
+    ? el("span", { class: "sc", title: `Score after the round, ${order}` }, scoreText(r.after, r.game))
+    : el("span", { class: "sc faint", title: `Score going into the round, ${order}` }, scoreText(r.score, r.game));
   const marks = el("span", { class: "marks" },
     r.post ? el("span", { class: "planted", title: "Spike planted" }, spikeIcon(), "Planted") : null,
     r.timeouts.length ? el("span", { class: "to-mark", title: "Timeout during this round" }, "Timeout") : null);
@@ -612,20 +617,6 @@ function roundRow(r) {
     sc, marks,
     el("span", { class: "len", title: "How long the round was live, including the post-plant" }, dur(r.playTime)));
 }
-
-function renderSide() {
-  for (const b of $("#side").querySelectorAll("button")) b.classList.toggle("on", b.dataset.v === ourSide);
-}
-$("#side").addEventListener("click", async (e) => {
-  const b = e.target.closest("button");
-  if (!b || !current || b.dataset.v === ourSide) return;
-  ourSide = b.dataset.v;
-  renderSide();
-  showGame(shownGame);
-  renderRoundBar(activeRound, segAt($("#video").currentTime || 0));
-  try { await api(`/api/vods/${current.id}`, json("PATCH", { our_side: ourSide })); current.our_side = ourSide; }
-  catch (err) { toast(err.message, true); }
-});
 
 function markActive(scroll) {
   document.querySelectorAll(".rrow.now").forEach((n) => n.classList.remove("now"));
@@ -661,8 +652,8 @@ function renderRoundBar(r, s) {
   }
   $("#rb-game").textContent = games.length > 1 ? `Game ${r.game}` : "";
   $("#rb-round").textContent = `Round ${r.round}`;
-  $("#rb-score").textContent = scoreText(r.score);
-  $("#rb-score").title = "Score going into the round, your team first";
+  $("#rb-score").textContent = scoreText(r.score, r.game);
+  $("#rb-score").title = `Score going into the round, ${sideOf(r.game) ? "your team" : "left team"} first`;
   const items = PHASES.map(([slot, name, none], i) => {
     const seg = r[slot];
     const b = el("button", {

@@ -163,27 +163,19 @@ def detail(vod_id: str):
     return vod
 
 
-class Edit(BaseModel):
-    name: str | None = None
-    our_side: str | None = None     # "l" or "r": which HUD score is the team being coached
+class Rename(BaseModel):
+    name: str
 
 
 @app.patch("/api/vods/{vod_id}")
-def edit(vod_id: str, body: Edit):
-    fields = {}
-    if body.name is not None:
-        if not body.name.strip():
-            raise HTTPException(400, "name cannot be empty")
-        fields["name"] = body.name.strip()
-    if body.our_side is not None:
-        if body.our_side not in ("l", "r"):
-            raise HTTPException(400, "our_side must be 'l' or 'r'")
-        fields["our_side"] = body.our_side
+def rename(vod_id: str, body: Rename):
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(400, "name cannot be empty")
     con = db.connect()
     _row(con, vod_id)
-    if fields:
-        with con:
-            con.execute(f"UPDATE vods SET {', '.join(f'{k}=?' for k in fields)} WHERE id=?", (*fields.values(), vod_id))
+    with con:
+        con.execute("UPDATE vods SET name=? WHERE id=?", (name, vod_id))
     con.close()
     return {"ok": True}
 

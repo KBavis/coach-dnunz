@@ -1,7 +1,8 @@
 """Scan a VOD at a fixed fps and cache small crops of the top-center HUD.
 
-Crops (1080p coordinates): round timer / spike icon, attacker score, defender score.
-Output: <out>.npz with arrays timer, left, right (uint8 RGB) and fps.
+Crops (1080p coordinates): round timer / spike icon, attacker score, defender score, plus the
+round-result banner area below them, kept only for frames that look like they show a banner.
+Output: <out>.npz with arrays timer, left, right (uint8 RGB), banner + banner_idx, and fps.
 
 Decoding is most of the work, so the video is cut into chunks that a CPU decoder and, when
 there is an NVIDIA GPU, a GPU decoder pull from a shared queue. Each keeps busy at its own speed:
@@ -12,13 +13,17 @@ import queue, subprocess, sys, shutil, threading
 import numpy as np
 import static_ffmpeg
 
+from pipeline import banner as banner_mod
+
 static_ffmpeg.add_paths()
 
-# HUD strip: x 560..1360, y 0..110 (1080p). Sub-crops are relative to the strip.
-STRIP_X, STRIP_Y, STRIP_W, STRIP_H = 560, 0, 800, 110
+# HUD strip: x 560..1360, y 0..265 (1080p), tall enough to include the round-result banner.
+# Sub-crops are relative to the strip.
+STRIP_X, STRIP_Y, STRIP_W, STRIP_H = 560, 0, 800, 265
 TIMER = (330, 8, 140, 87)   # x, y, w, h within strip
 LEFT = (230, 25, 70, 50)
 RIGHT = (505, 25, 70, 50)
+BANNER = (260, 145, 280, 120)   # the WON / LOST / CLUTCH word (see pipeline/banner.py)
 TO_1080 = "scale=1920:1080:flags=bicubic"           # any resolution -> 1080p coordinates
 CROP = f"crop={STRIP_W}:{STRIP_H}:{STRIP_X}:{STRIP_Y}"
 
@@ -70,6 +75,7 @@ def main(video, out, fps=1, on_progress=None, gpu=True, duration=None):
     filled = [0] * total
     done_s = [0.0]
     lock = threading.Lock()
+    banners = {}                  # row -> banner crop, only for frames with banner-sized letters
 
     def decode(decoder):
         size = STRIP_W * STRIP_H * 3
@@ -88,6 +94,9 @@ def main(video, out, fps=1, on_progress=None, gpu=True, duration=None):
                 a = np.frombuffer(buf, np.uint8).reshape(STRIP_H, STRIP_W, 3)
                 r = row0 + n
                 arrs["timer"][r], arrs["left"][r], arrs["right"][r] = sub(a, TIMER), sub(a, LEFT), sub(a, RIGHT)
+                b = sub(a, BANNER)
+                if banner_mod.has_word(b):
+                    banners[r] = b.min(axis=2)          # grey is enough to read the word, 1/3 the memory
                 filled[r] = 1
                 n += 1
                 if n % 30 == 0:
@@ -114,7 +123,12 @@ def main(video, out, fps=1, on_progress=None, gpu=True, duration=None):
     n = max((i + 1 for i, f in enumerate(filled) if f), default=0)
     if not n:
         raise SystemExit("No video frames could be read from this file")
-    np.savez(out, timer=arrs["timer"][:n], left=arrs["left"][:n], right=arrs["right"][:n], fps=fps)
+    idx = sorted(i for i in banners if i < n)
+    bw, bh = BANNER[2], BANNER[3]
+    np.savez(out, timer=arrs["timer"][:n], left=arrs["left"][:n], right=arrs["right"][:n], fps=fps,
+             banner_idx=np.array(idx, np.int32),
+             banner=np.stack([banners[i] for i in idx]) if idx else np.zeros((0, bh, bw), np.uint8))
+    print("banner candidates:", len(idx), flush=True)
     print("frames:", n, "missing:", n - sum(filled[:n]), flush=True)
 
 

@@ -78,6 +78,9 @@ easier than one mixed track.
    frozen for several seconds is a timeout.
 4. Noisy readings are cleaned up along the way, for example by requiring a score change to be
    seen several times in a row before believing it.
+5. Round results come from the WON / LOST banner shown at each round end (`pipeline/banner.py`),
+   read from the same scan. Matching banners against which score went up tells which side of the
+   HUD is the team being watched, so wins and losses need no setup.
 
 The detection code runs as a separate process, so a crash or a runaway memory spike can't take
 the web app down.

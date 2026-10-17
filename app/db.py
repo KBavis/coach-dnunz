@@ -17,8 +17,7 @@ CREATE TABLE IF NOT EXISTS vods (
     error TEXT DEFAULT '',
     duration REAL DEFAULT 0,
     created_at REAL NOT NULL,
-    source_url TEXT DEFAULT '',
-    our_side TEXT DEFAULT 'l'      -- which HUD score is the team being coached: 'l' or 'r'
+    source_url TEXT DEFAULT ''
 )
 """
 
@@ -31,8 +30,7 @@ def connect():
     cols = {r[1] for r in con.execute("PRAGMA table_info(vods)")}
     if "source_url" not in cols:                                  # older libraries
         con.execute("ALTER TABLE vods ADD COLUMN source_url TEXT DEFAULT ''")
-    if "our_side" not in cols:
-        con.execute("ALTER TABLE vods ADD COLUMN our_side TEXT DEFAULT 'l'")
+
     return con
 
 

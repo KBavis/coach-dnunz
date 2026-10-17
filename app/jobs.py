@@ -247,6 +247,26 @@ def enqueue(vod_id):
         _analyses.put((_added_at(vod_id), vod_id))
 
 
+def _add_results():
+    """VODs processed before round results were read get them now, one at a time in the
+    background (re-reading the WON / LOST banners around each round end, ~20 s per VOD)."""
+    setup.READY.wait()
+    con = db.connect()
+    ids = [r["id"] for r in con.execute("SELECT id FROM vods WHERE status='ready' ORDER BY created_at DESC")]
+    con.close()
+    for vod_id in ids:
+        seg, video = work_dir(vod_id) / "segments.json", video_path(vod_id)
+        try:
+            res = json.loads(seg.read_text())
+        except (FileNotFoundError, ValueError):
+            continue
+        ends = [x for x in res["segments"] if x["phase"] == "ROUND_END"]
+        if video is None or not ends or all("result" in x for x in ends):
+            continue
+        subprocess.run([sys.executable, "-m", "pipeline.banner", str(video), str(work_dir(vod_id))],
+                       cwd=ROOT, env=_env(), capture_output=True, timeout=1800)
+
+
 def start():
     """Start the worker pools and resume anything interrupted by a restart."""
     global _started
@@ -257,6 +277,7 @@ def start():
         threading.Thread(target=_worker, args=(_downloads, _fetch), daemon=True).start()
     for _ in range(ANALYSES):
         threading.Thread(target=_worker, args=(_analyses, _analyse), daemon=True).start()
+    threading.Thread(target=_add_results, daemon=True).start()
     con = db.connect()
     stuck = [r["id"] for r in con.execute("SELECT id FROM vods WHERE status IN ('queued','processing') ORDER BY created_at")]
     con.close()

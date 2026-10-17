@@ -9,11 +9,13 @@ kill from taking the web server down; readings are saved incrementally so a reru
 import json, os, subprocess, sys, time
 from pathlib import Path
 
+import numpy as np
+
 import static_ffmpeg
 
 static_ffmpeg.add_paths()
 
-from pipeline import extract_hud, read_hud, segment  # noqa: E402
+from pipeline import banner, extract_hud, read_hud, segment  # noqa: E402
 
 FPS = 1           # HUD readings per second
 
@@ -53,6 +55,13 @@ def main(video, work):
     progress(work, "Building timeline", 95)
     result = segment.analyze(str(readings))
     result["duration"] = max(result["duration"], duration)
+
+    # stage 4: round results from the WON / LOST banners (crops kept by the scan, in seconds)
+    progress(work, "Reading round results", 97)
+    d = np.load(npz)
+    fps = float(d["fps"])
+    saved = {int(i / fps): c for i, c in zip(d["banner_idx"], d["banner"])} if "banner_idx" in d.files else None
+    banner.add_results(video, result, saved=saved)
     (work / "segments.json.tmp").write_text(json.dumps(result))
     (work / "segments.json.tmp").replace(work / "segments.json")
     npz.unlink(missing_ok=True)            # large, and only needed to re-read the HUD
