@@ -250,7 +250,7 @@ function card(v, q) {
   img.onerror = () => img.remove();
   const title = el("div", { class: "title", title: v.name }, highlight(v.name, q));
   const c = el("div", { class: "card", tabindex: "0", onclick: () => { location.hash = `#/vod/${v.id}`; },
-    onkeydown: (e) => { if (e.key === "Enter") location.hash = `#/vod/${v.id}`; } },
+    onkeydown: (e) => { if (e.key === "Enter" && e.target === e.currentTarget) location.hash = `#/vod/${v.id}`; } },
     el("div", { class: "thumb" }, "◆", img, el("span", { class: "dur" }, fmt(v.duration))),
     el("div", { class: "body" }, title, el("div", { class: "meta" }, meta)),
     el("button", { class: "icon more", title: "More", onclick: (e) => {
@@ -287,9 +287,13 @@ function startRename(v, target) {
     if (current?.id === v.id) { current.name = v.name; document.title = `${v.name} · Coach dnunz`; }
     gridKey = ""; refresh();
   };
-  input.addEventListener("keydown", (e) => { if (e.key === "Enter") finish(true); if (e.key === "Escape") finish(false); });
+  input.addEventListener("keydown", (e) => {
+    e.stopPropagation();                       // Enter must not also reach the card and open the VOD
+    if (e.key === "Enter") { e.preventDefault(); finish(true); }
+    if (e.key === "Escape") finish(false);
+  });
   input.addEventListener("blur", () => finish(true));
-  input.addEventListener("click", (e) => e.stopPropagation());
+  for (const ev of ["click", "pointerdown", "dblclick"]) input.addEventListener(ev, (e) => e.stopPropagation());
 }
 
 async function reprocess(v, confirmFirst = false) {
