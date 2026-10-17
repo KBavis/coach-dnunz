@@ -107,9 +107,25 @@ function showLibrary() {
 
 /* ---------- library ---------- */
 let lastStatus = null;   // id -> status at the previous refresh
+// Whether the app (the black window) is answering. Until it first does, the page shows
+// "Connecting" rather than an empty library; if it stops answering later, a banner says so.
+let connected = null;
+function setConnected(ok) {
+  if (ok === connected) return;
+  const first = connected === null;
+  connected = ok;
+  $("#connecting").hidden = ok || !first;
+  $("#offline").hidden = ok || first;
+  if (ok && first) route();                       // now there is something to show
+}
+
 async function refresh() {
   let list;
-  try { list = await api("/api/vods"); } catch (_) { return; }
+  try { list = await api("/api/vods"); } catch (_) {
+    if (connected !== false) setConnected(connected === null ? null : false);
+    return;
+  }
+  setConnected(true);
   if (lastStatus) {
     for (const v of list) {
       const was = lastStatus.get(v.id);
@@ -130,6 +146,7 @@ async function refresh() {
 
 function renderLibrary() {
   renderActivity();
+  if (!connected) return;                         // nothing reliable to show yet
   if (view !== "library") return;
   renderJobs();
   renderGrid();
@@ -992,8 +1009,14 @@ document.addEventListener("keydown", (e) => {
 
 /* ---------- boot ---------- */
 (async function init() {
+  // poll quickly until the app answers (it may still be starting), then every 2 s
+  let wait = 0;
+  while (connected !== true) {
+    await refresh();
+    if (connected === true) break;
+    if (++wait === 8) $("#connecting-slow").hidden = false;     // ~8 s: say what to check
+    await new Promise((r) => setTimeout(r, 1000));
+  }
   try { config = await api("/api/config"); } catch (_) {}
-  await refresh();
-  route();
-  setInterval(refresh, 2000);
+  (function poll() { setTimeout(async () => { await refresh(); poll(); }, connected ? 2000 : 1000); })();
 })();

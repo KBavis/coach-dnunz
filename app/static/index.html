@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Coach Dnunz</title>
-<link rel="stylesheet" href="style.css?v=16">
+<link rel="stylesheet" href="style.css?v=17">
 </head>
 <body>
 <header id="topbar">
@@ -17,9 +17,15 @@
   <button id="add-btn" class="primary">+ Add VODs</button>
 </header>
 
+<div id="offline" hidden>Lost contact with the app. Is its black window still open? Reconnecting…</div>
 <main id="main">
+  <section id="connecting">
+    <div class="spinner"></div>
+    <p>Connecting to Coach Dnunz…</p>
+    <p id="connecting-slow" class="muted small" hidden>Still waiting. Make sure the black window that start.bat (or start.sh) opened is still running.</p>
+  </section>
   <!-- ---------- library ---------- -->
-  <section id="library-view">
+  <section id="library-view" hidden>
     <div id="jobs-wrap" hidden>
       <div class="sec-head">
         <h3 id="jobs-title">Processing queue</h3><span id="jobs-note" class="muted small"></span>
@@ -158,6 +164,6 @@
 <div id="menu" class="menu" hidden></div>
 <div id="tip" hidden></div>
 <div id="toast" hidden></div>
-<script src="app.js?v=16"></script>
+<script src="app.js?v=17"></script>
 </body>
 </html>
