@@ -154,40 +154,42 @@ name = "coach-dnunz"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
-    { name = "deno" },
     { name = "fastapi" },
-    { name = "numpy" },
-    { name = "opencv-python-headless" },
-    { name = "pillow" },
     { name = "psutil" },
     { name = "python-multipart" },
-    { name = "rapidocr-onnxruntime" },
     { name = "static-ffmpeg" },
     { name = "uvicorn", extra = ["standard"] },
-    { name = "yt-dlp", extra = ["default"] },
 ]
 
 [package.optional-dependencies]
 dev = [
     { name = "playwright" },
 ]
-
-[package.metadata]
-requires-dist = [
+engine = [
     { name = "deno" },
-    { name = "fastapi" },
     { name = "numpy" },
     { name = "opencv-python-headless" },
     { name = "pillow" },
+    { name = "rapidocr-onnxruntime" },
+    { name = "yt-dlp", extra = ["default"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "deno", marker = "extra == 'engine'" },
+    { name = "fastapi" },
+    { name = "numpy", marker = "extra == 'engine'" },
+    { name = "opencv-python-headless", marker = "extra == 'engine'" },
+    { name = "pillow", marker = "extra == 'engine'" },
     { name = "playwright", marker = "extra == 'dev'" },
     { name = "psutil" },
     { name = "python-multipart" },
-    { name = "rapidocr-onnxruntime" },
+    { name = "rapidocr-onnxruntime", marker = "extra == 'engine'" },
     { name = "static-ffmpeg" },
     { name = "uvicorn", extras = ["standard"] },
-    { name = "yt-dlp", extras = ["default"] },
+    { name = "yt-dlp", extras = ["default"], marker = "extra == 'engine'" },
 ]
-provides-extras = ["dev"]
+provides-extras = ["engine", "dev"]
 
 [[package]]
 name = "colorama"

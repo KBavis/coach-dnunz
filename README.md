@@ -29,9 +29,9 @@ Works today, on one sample stream:
 Not done yet:
 
 - **Transcription and speaker labels.** The panel in the viewer is a placeholder.
-- **Speed.** Detection currently takes roughly 4x real time (about 30 minutes for a 1h45m VOD),
-  because it runs OCR on the CPU several times per frame. A cheaper way of reading the digits is
-  the obvious next fix.
+- **Speed.** Reading the HUD now uses template matching first and OCR only as a fallback: about
+  4 minutes instead of 25 for a 1h45m VOD, with the same rounds and timeouts. Jobs still run one
+  at a time.
 - **Wider testing.** It has only been checked against one stream. It expects Valorant's default
   observer/spectator HUD at the top centre, and other layouts or resolutions may misread.
 
@@ -64,7 +64,9 @@ easier than one mixed track.
 ## How it works
 
 1. `ffmpeg` decodes the video and crops the small HUD strip at the top centre.
-2. OCR reads the round timer and both scores about once a second.
+2. The round timer and both scores are read about once a second, by matching the white digit
+   shapes against templates (`pipeline/digits.py`). OCR only runs on in-game frames the
+   templates could not read, and gaps the neighbouring seconds make obvious are filled in.
 3. A state machine turns those readings into segments. The timer counts down in the buy phase,
    restarts at about 1:40 when the round goes live, gets replaced by a spike icon after a
    plant, and a short countdown plus a score change marks the round end. A timer that stays
@@ -90,5 +92,5 @@ To add an already-processed VOD without copying it:
 The idea of a phase state machine over HUD readings was informed by
 [Valoscribe](https://github.com/SphinxNumberNine/valoscribe), an MIT-licensed tool that does
 this for pro broadcast footage. Its note that generic OCR struggles on Valorant's font, and
-that template matching works better, is the reason that's the planned speed fix here (this
-project currently uses general-purpose OCR). No code was copied from it.
+that template matching works better, is why this project reads digits by template matching.
+No code was copied from it.

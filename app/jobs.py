@@ -4,9 +4,7 @@ import json, os, queue, re, subprocess, sys, threading, time
 import psutil
 import static_ffmpeg
 
-from . import db
-
-static_ffmpeg.add_paths()   # puts ffmpeg/ffprobe on PATH for yt-dlp and the pipeline
+from . import db, setup
 
 ROOT = db.ROOT
 # subprocesses see the venv's tools (deno, which yt-dlp needs for YouTube) and speak UTF-8 on Windows too
@@ -56,16 +54,26 @@ def _download(vod_id, url):
     with con:
         con.execute("UPDATE vods SET name=?, filename=? WHERE id=? AND name=?", (title or url, title or url, vod_id, url))
     con.close()
+    # "download:" in a progress template only selects the line type, yt-dlp does not print it,
+    # so the lines carry their own PCT marker to match on
     proc = subprocess.Popen(
-        yt + ["--newline", "--progress-template", "download:%(progress._percent_str)s", "-f", FORMAT,
+        yt + ["--newline", "--progress-template", "download:PCT %(progress._percent_str)s", "-f", FORMAT,
               "--merge-output-format", "mp4", "-o", str(work / "source.%(ext)s"), url],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, **text)
-    tail = []
+    tail, streams, last = [], 0, -1.0
     for line in proc.stdout:
         tail = (tail + [line.strip()])[-4:]
-        m = re.search(r"download:\s*([\d.]+)%", line)
-        if m:
-            _update(vod_id, stage="Downloading from YouTube", pct=float(m.group(1)))
+        if "[download] Destination:" in line:
+            streams += 1                  # video first, then audio: two downloads, one bar
+        elif line.startswith("[Merger]"):
+            _update(vod_id, stage="Joining video and audio", pct=99)
+        elif m := re.search(r"PCT\s*([\d.]+)%", line):
+            p = float(m.group(1))
+            pct = p * 0.9 if streams <= 1 else 90 + p * 0.09
+            if abs(pct - last) >= 0.1:
+                last = pct
+                _update(vod_id, stage="Downloading from YouTube" if streams <= 1 else "Downloading audio",
+                        pct=round(pct, 1))
     proc.wait()
     if proc.returncode != 0 or video_path(vod_id) is None:
         return "download failed: " + " | ".join(x for x in tail if x)
@@ -93,6 +101,7 @@ def _kill_tree(pid):
 
 
 def _run(vod_id):
+    setup.add_tool_paths()
     work = work_dir(vod_id)
     _update(vod_id, status="processing", stage="Starting", pct=0, error="")
     if video_path(vod_id) is None:
@@ -141,6 +150,7 @@ def _run(vod_id):
 
 
 def _worker():
+    setup.READY.wait()          # nothing can be processed until the setup screen has finished
     while True:
         vod_id = _q.get()
         try:

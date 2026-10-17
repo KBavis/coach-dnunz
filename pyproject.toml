@@ -3,19 +3,22 @@ name = "coach-dnunz"
 version = "0.1.0"
 description = "Local-first Valorant VOD breakdown tool for coaching"
 requires-python = ">=3.12,<3.13"   # rapidocr-onnxruntime has no 3.13 build
+# Just enough to start the web app. The setup screen installs the "engine" extra and ffmpeg.
 dependencies = [
     "fastapi",
     "uvicorn[standard]",
     "python-multipart",
+    "psutil",
+    "static-ffmpeg",                # downloads ffmpeg/ffprobe on first use, on any OS
+]
+
+[project.optional-dependencies]
+engine = [                          # the heavy part: OCR and YouTube downloads
     "numpy",
     "pillow",
     "opencv-python-headless",
     "rapidocr-onnxruntime",
-    "static-ffmpeg",                # downloads ffmpeg/ffprobe on first use, on any OS
     "yt-dlp[default]",
     "deno",                         # JavaScript runtime yt-dlp needs for YouTube; no separate install
-    "psutil",
 ]
-
-[project.optional-dependencies]
 dev = ["playwright"]

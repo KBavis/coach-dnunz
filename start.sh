@@ -18,4 +18,4 @@ if ! command -v uv >/dev/null 2>&1; then
 fi
 
 echo "[coach] Getting everything ready (the first run downloads Python and libraries, a few minutes)..."
-exec uv run python launch.py "$@"
+exec uv run --extra engine python launch.py "$@"
