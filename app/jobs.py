@@ -73,32 +73,54 @@ def _download(vod_id, url):
         con.execute("UPDATE vods SET name=?, filename=? WHERE id=? AND name=?", (title or url, title or url, vod_id, url))
     con.close()
     # "download:" in a progress template only selects the line type, yt-dlp does not print it,
-    # so the lines carry their own PCT marker to match on
+    # so the lines carry their own PCT marker to match on, then bytes done / total / speed / eta
+    template = ("download:PCT %(progress._percent_str)s|%(progress.downloaded_bytes)s|%(progress.total_bytes)s"
+                "|%(progress.total_bytes_estimate)s|%(progress.speed)s|%(progress.eta)s")
     proc = subprocess.Popen(
-        yt + ["--newline", "--progress-template", "download:PCT %(progress._percent_str)s", "-f", FORMAT,
+        yt + ["--newline", "--progress-template", template, "-f", FORMAT,
               "--concurrent-fragments", "4",
               "--merge-output-format", "mp4", "-o", str(work / "source.%(ext)s"), url],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, **text)
     _procs[vod_id] = proc
-    tail, streams, last = [], 0, -1.0
+    tail, streams, last = [], 0, 0.0
     for line in proc.stdout:
         tail = (tail + [line.strip()])[-4:]
         if "[download] Destination:" in line:
             streams += 1                  # video first, then audio: two downloads, one bar
         elif line.startswith("[Merger]"):
             _update(vod_id, stage="Joining video and audio", pct=99)
-        elif m := re.search(r"PCT\s*([\d.]+)%", line):
+        elif m := re.search(r"PCT\s*([\d.]+)%(.*)", line):
             p = float(m.group(1))
             pct = p * 0.9 if streams <= 1 else 90 + p * 0.09
-            if abs(pct - last) >= 0.1:
-                last = pct
-                _update(vod_id, stage="Downloading from YouTube" if streams <= 1 else "Downloading audio",
-                        pct=round(pct, 1))
+            if time.time() - last >= 1:   # the numbers change constantly; once a second is plenty
+                last = time.time()
+                what = "Downloading from YouTube" if streams <= 1 else "Downloading audio"
+                _update(vod_id, stage=" · ".join([what, *_download_details(m.group(2))]), pct=round(pct, 1))
     proc.wait()
     _procs.pop(vod_id, None)
     if proc.returncode != 0 or video_path(vod_id) is None:
         return "download failed: " + " | ".join(x for x in tail if x)
     return None
+
+
+def _download_details(rest):
+    """'|done|total|estimate|speed|eta' from the progress line -> ['2.1 of 6.8 GB', '13 MB/s', '6 min left']."""
+    def num(x):
+        try:
+            return float(x)
+        except ValueError:
+            return None
+    parts = [num(x) for x in rest.strip().lstrip("|").split("|")] + [None] * 5
+    done, total, estimate, speed, eta = parts[:5]
+    total = total or estimate
+    out = []
+    if done is not None and total:
+        out.append(f"{done / 1e9:.1f} of {total / 1e9:.1f} GB" if total >= 1e9 else f"{done / 1e6:.0f} of {total / 1e6:.0f} MB")
+    if speed:
+        out.append(f"{speed / 1e6:.0f} MB/s" if speed >= 1e6 else f"{speed / 1e3:.0f} kB/s")
+    if eta is not None:
+        out.append("under a minute left" if eta < 60 else f"{round(eta / 60)} min left")
+    return out
 
 
 def _min_free_mb():

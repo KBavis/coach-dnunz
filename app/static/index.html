@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Coach Dnunz</title>
-<link rel="stylesheet" href="style.css?v=9">
+<link rel="stylesheet" href="style.css?v=10">
 </head>
 <body>
 <header id="topbar">
@@ -119,9 +119,11 @@
       <span class="label">YouTube links</span>
       <div id="link-rows"></div>
       <button type="button" id="add-link" class="ghost-add">+ Add another link</button>
+      <small class="hint">YouTube videos download first: about 7 GB for a 3-hour stream at 1080p. If you already
+        have the recording, adding the file below skips the download and is faster.</small>
     </div>
     <div class="field">
-      <span class="label">Video files</span>
+      <span class="label">Video files <span class="muted small">· fastest, processing starts right away</span></span>
       <label id="drop" tabindex="0">
         <input id="file" type="file" accept=".mp4,.mkv,.mov,.webm,video/*" multiple hidden>
         <strong>Drop video files here</strong>
@@ -154,6 +156,6 @@
 <div id="menu" class="menu" hidden></div>
 <div id="tip" hidden></div>
 <div id="toast" hidden></div>
-<script src="app.js?v=9"></script>
+<script src="app.js?v=10"></script>
 </body>
 </html>
