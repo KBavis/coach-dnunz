@@ -40,27 +40,34 @@ Not done yet:
 
 ## Run
 
-One step, no setup. The first start downloads everything it needs (Python, libraries, ffmpeg),
-which takes a few minutes. Later starts take seconds.
+No setup, nothing to install first.
 
-- **Windows:** double-click `start.bat`.
-- **WSL, Linux or macOS:** run `./start.sh` in a terminal.
+**Windows**
 
-Your browser opens on the app. Keep the window that opened alongside it running while you use
-the app, and close it to stop. Nothing needs to be installed beforehand: the script installs
-[uv](https://docs.astral.sh/uv/), which brings the right Python version and every dependency
-with it. If port 8000 is busy, the app picks the next free port.
+1. On this repository's GitHub page, click the green **Code** button, then **Download ZIP**.
+   (Or clone it, if you use git.)
+2. Unzip it somewhere you'll find it again, for example your Documents folder.
+3. Open the unzipped folder and double-click **`start.bat`**. If Windows shows "Windows protected
+   your PC", click **More info**, then **Run anyway**.
+
+**WSL, Linux or macOS:** get the code the same way (or `git clone`), then run `./start.sh` in a
+terminal inside the folder.
+
+The first start downloads what the app needs (uv, Python, libraries, ffmpeg), a few hundred MB,
+which takes a few minutes on a slow connection. Later starts take seconds. Your browser then
+opens the app. Keep the black window that opened alongside it running while you use the app,
+and close it to stop. If port 8000 is busy, the app picks the next free port.
 
 If Windows says the OCR engine could not load, install the
 [Microsoft Visual C++ Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe) and
 start it again.
 
-For developers: `uv run python launch.py --no-browser`, or `uv run uvicorn app.main:app --port 8000`.
+For developers: `uv run --extra engine python launch.py --no-browser` (`COACH_PORT` sets the port).
 
-Click **Add VODs** (or drop video files anywhere on the page) and paste YouTube links one per
-line. Progress shows under "In progress", and each VOD joins the library when it is ready.
-Press `/` to search, `[` and `]` to step through rounds, `1`-`4` to jump to a round's phases, and
-click a VOD's name to rename it.
+**Using it:** click **Add VODs**, then add video files (fastest: processing starts right away) or
+YouTube links (each video downloads first). Click **Process VODs**. Each VOD shows its progress
+step by step, then joins the library. Open one to jump between games and rounds; press `/` to
+search, `[` and `]` to step through rounds, and `1`-`4` to jump to a round's phases.
 
 Recording tip for future sessions: in OBS you can record the mic, Discord, and game audio as
 separate tracks inside one file. That will make transcription and speaker separation far

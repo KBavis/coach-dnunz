@@ -608,10 +608,19 @@ async function openVod(id) {
   $("#viewer-view").hidden = false;
   closeMenu();
   if (current?.id === d.id) return;
+  const previous = current;
   current = d;
   document.title = `${d.name} · Coach Dnunz`;
   shownGame = null; playingGame = null;
-  useBreakdown(d);
+  try {
+    useBreakdown(d);
+  } catch (err) {                          // never leave one VOD's video under another's rounds
+    console.error(err);
+    current = previous;
+    toast("This VOD's breakdown could not be loaded. Try re-running detection from its menu.", true);
+    location.hash = "#/";
+    return;
+  }
   const v = $("#video");
   v.src = `/api/vods/${d.id}/video`;
   v.playbackRate = speed;
@@ -651,11 +660,13 @@ function buildRounds(result) {
     map.get(key)[{ PRE_ROUND: "pre", ROUND: "live", POST_PLANT: "post", ROUND_END: "end" }[s.phase]] = s;
   }
   const list = [...map.values()].map((r) => {
+    // a round can be missing phases (e.g. only a buy phase was seen), so every lookup falls back
     const first = r.pre || r.live || r.post || r.end;
+    const live = r.live || r.post || r.end || first;
     r.start = first.start;
-    r.liveStart = (r.live || r.post || r.end).start;          // the round "starts" when it goes live
+    r.liveStart = live.start;                                  // the round "starts" when it goes live
     r.finish = (r.end || r.post || r.live || r.pre).end;
-    r.playTime = Math.max(0, (r.post || r.live || r.end).end - r.liveStart);   // live + post-plant
+    r.playTime = r.live || r.post ? Math.max(0, (r.post || r.live).end - r.liveStart) : 0;   // live + post-plant
     // score going into the round, read once it is live: at the buy phase the previous result may
     // not have settled on the HUD yet
     r.score = (r.live || r.post || first).score;

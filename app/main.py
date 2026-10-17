@@ -50,9 +50,12 @@ def _result(vod_id):
     if not seg.exists():
         return None
     res = json.loads(seg.read_text())
+    from pipeline import segment
+    before = len(res["games"])
+    if len(segment.drop_restarts(res)["games"]) != before:      # remakes in an older breakdown
+        seg.write_text(json.dumps(res))
     readings = db.VODS / vod_id / "readings.jsonl"
     if readings.exists() and any(s.get("game") is not None and "score" not in s for s in res["segments"]):
-        from pipeline import segment
         new = segment.analyze(str(readings))
         new["duration"] = max(new["duration"], res.get("duration", 0))
         seg.write_text(json.dumps(new))

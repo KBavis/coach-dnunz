@@ -217,13 +217,55 @@ def hms(t):
     return f"{t // 3600}:{t % 3600 // 60:02d}:{t % 60:02d}"
 
 
+RESTART_MAX_ROUNDS = 4   # a game this short, followed by a fresh 0-0 game, was a remake
+
+
+def drop_restarts(result):
+    """Turn remakes into dead time: a game of at most RESTART_MAX_ROUNDS rounds that is followed by
+    another game starting at 0-0 was abandoned and restarted (seen in scrims after a tech pause).
+    A stream that just ends during its last game, or one game split in two by a long pause (its
+    second half does not start at 0-0), is left alone. Safe to run again on its own output."""
+    games = sorted(result["games"], key=lambda g: g["start"])
+    segs = result["segments"]
+    first_score = {}
+    for x in sorted(segs, key=lambda x: x["start"]):
+        if x["game"] is not None:
+            first_score.setdefault(x["game"], x.get("score"))
+    dropped = {g["game"] for g, nxt in zip(games, games[1:])
+               if g["rounds"] <= RESTART_MAX_ROUNDS and first_score.get(nxt["game"]) == [0, 0]}
+    if not dropped:
+        return result
+    spans = [(g["start"], g["end"]) for g in games if g["game"] in dropped]
+    out = []
+    for x in sorted(segs, key=lambda x: x["start"]):
+        if x["game"] in dropped:
+            x = dict(start=x["start"], end=x["end"], game=None, phase="NON_GAME", round=None, label="NON_GAME")
+        if out and x["game"] is None and out[-1]["game"] is None:
+            out[-1]["end"] = max(out[-1]["end"], x["end"])        # merge neighbouring dead time
+        else:
+            out.append(x)
+    renumber = {g["game"]: n for n, g in enumerate((g for g in games if g["game"] not in dropped), 1)}
+    for x in out:
+        if x["game"] is not None:
+            x["game"] = renumber[x["game"]]
+    kept = []
+    for g in games:
+        if g["game"] not in dropped:
+            kept.append(dict(g, game=renumber[g["game"]]))
+    result["segments"] = out
+    result["games"] = kept
+    result["pauses"] = [p for p in result.get("pauses", []) if not any(a <= p["start"] < b for a, b in spans)]
+    result["restarts_dropped"] = result.get("restarts_dropped", 0) + len(dropped)
+    return result
+
+
 def analyze(readings_path):
     rs = load(readings_path)
     drop_isolated_decimals(rs)
     drop_short_spikes(rs)
     pauses = find_pauses(rs)
     segs, games = build(rs)
-    return dict(duration=(rs[-1]["t"] + 1) if rs else 0, games=games, segments=segs, pauses=pauses)
+    return drop_restarts(dict(duration=(rs[-1]["t"] + 1) if rs else 0, games=games, segments=segs, pauses=pauses))
 
 
 if __name__ == "__main__":
