@@ -488,9 +488,18 @@ window.addEventListener("drop", (e) => {
 });
 
 /* ---------- viewer ---------- */
+// The viewer is built around rounds: pick a game and a round on the right, then jump between its
+// phases under the video. One accent colour marks where you are; everything else stays neutral.
 let current = null;      // detail of the VOD being viewed
 let segs = [], pauses = [], rounds = [], games = [], duration = 0;
 let shownGame = null;
+
+const PHASES = [            // [slot, label, label when the round has none]
+  ["pre", "Buy phase", "No buy phase"],
+  ["live", "Live", "No live phase"],
+  ["post", "Post-plant", "No plant"],
+  ["end", "Round end", "Round end"],
+];
 
 async function openVod(id) {
   let d;
@@ -513,13 +522,12 @@ async function openVod(id) {
   games = res.games;
   duration = res.duration || d.duration;
   rounds = buildRounds(res);
-  activeKey = null; activeRound = null; nowKey = ""; shownGame = null;
+  activeKey = undefined; activeRound = null; shownGame = null; playingGame = null;
   $("#v-name").textContent = d.name;
-  $("#v-meta").textContent = [fmt(duration), plural(games.length, "game"), plural(rounds.length, "round"), plural(pauses.length, "timeout")].join(" · ");
+  $("#v-meta").textContent = [fmt(duration), plural(games.length, "game"), plural(rounds.length, "round")].join(" · ");
   const v = $("#video");
   v.src = `/api/vods/${d.id}/video`;
   v.playbackRate = speed;
-  renderTimeline();
   showGame(games[0]?.game ?? null);
   update();
 }
@@ -530,138 +538,123 @@ function buildRounds(result) {
     if (s.game == null) continue;
     const key = `${s.game}:${s.round}`;
     if (!map.has(key)) map.set(key, { game: s.game, round: s.round, key });
-    const r = map.get(key);
-    r[{ PRE_ROUND: "pre", ROUND: "live", POST_PLANT: "post", ROUND_END: "end" }[s.phase]] = s;
+    map.get(key)[{ PRE_ROUND: "pre", ROUND: "live", POST_PLANT: "post", ROUND_END: "end" }[s.phase]] = s;
   }
-  return [...map.values()].map((r) => {
+  const list = [...map.values()].map((r) => {
     const first = r.pre || r.live || r.post || r.end;
     r.start = first.start;
     r.liveStart = (r.live || r.post || r.end).start;          // the round "starts" when it goes live
     r.finish = (r.end || r.post || r.live || r.pre).end;
     r.playTime = Math.max(0, (r.post || r.live || r.end).end - r.liveStart);   // live + post-plant
-    r.score = first.score;
+    // score going into the round, read once it is live: at the buy phase the previous result may
+    // not have settled on the HUD yet
+    r.score = (r.live || r.post || first).score;
     r.timeouts = pauses.filter((p) => p.start < r.finish && p.end > r.start);
     return r;
   }).sort((a, b) => a.start - b.start);
+  // who took the round: the side whose score is one higher when the next round starts
+  const known = (sc) => sc && sc[0] != null && sc[1] != null;
+  list.forEach((r, i) => {
+    const next = list[i + 1];
+    // the next round's score, or for a game's last round the score shown at its round end
+    const after = next && next.game === r.game ? next.score : r.end?.score;
+    if (known(r.score) && known(after)) {
+      const dl = after[0] - r.score[0], dr = after[1] - r.score[1];
+      if (dl + dr === 1 && dl >= 0 && dr >= 0) { r.after = after; r.winner = dl ? "l" : "r"; }
+    }
+  });
+  return list;
 }
 
 const scoreText = (sc) => (sc && sc[0] != null && sc[1] != null ? `${sc[0]}–${sc[1]}` : "");
-
-function renderTimeline() {
-  const tl = $("#timeline");
-  const pct = (t) => `${(t / duration) * 100}%`;
-  tl.replaceChildren(...segs.map((s) => el("div", {
-    class: `seg ${PHASE[s.phase].cls}` + (s.phase === "ROUND" ? " round-start" : ""),
-    style: `left:${pct(s.start)};width:${Math.max(((s.end - s.start) / duration) * 100, 0.08)}%`,
-  })), el("div", { id: "tl-pauses" }, ...pauses.map((p) => el("i", { style: `left:${pct(p.start)};width:${pct(p.end - p.start)}` }))),
-  el("div", { id: "round-band", style: "display:none" }), el("div", { id: "playhead" }));
-  $("#tl-games").replaceChildren(...games.map((g) => el("span", {
-    style: `left:${pct(g.start)};width:${pct(g.end - g.start)}`,
-  }, `Game ${g.game} · ${g.rounds} rounds`)));
-}
-
-// clicking the timeline jumps to the start of the section under the pointer
-const tlTime = (e) => { const r = $("#timeline").getBoundingClientRect(); return Math.min(Math.max((e.clientX - r.left) / r.width, 0), 1) * duration; };
-$("#timeline").addEventListener("click", (e) => { const t = tlTime(e); const s = segAt(t); seek(s ? s.start : t); });
-$("#timeline").addEventListener("mousemove", (e) => {
-  const t = tlTime(e), s = segAt(t), p = pauseAt(t);
-  showTip(e, p && s?.game != null ? `${describe(t)} · timeout` : describe(t), s ? `click: jump to the start of this section (${fmt(s.start)})` : fmt(t));
-});
-$("#timeline").addEventListener("mouseleave", hideTip);
 
 /* rounds panel */
 function showGame(g) {
   shownGame = g;
   $("#game-tabs").replaceChildren(...games.map((x) => el("button", {
     class: x.game === g ? "on" : "", role: "tab", onclick: () => showGame(x.game),
-  }, games.length > 1 ? `Game ${x.game}` : "Rounds", el("span", { class: "muted" }, ` · ${x.rounds}`),
+  }, games.length > 1 ? `Game ${x.game}` : "Rounds", el("span", { class: "final" }, `${x.rounds}`),
   activeRound?.game === x.game && x.game !== g ? el("span", { class: "live-dot", title: "Playing" }) : null)));
   const list = rounds.filter((r) => r.game === g);
   $("#rounds").replaceChildren(...(games.length ? list.map(roundRow) : [el("p", { class: "empty-rounds muted" },
     "No Valorant rounds were found in this video. It may not be a match recording, or its HUD layout is one the detector does not know yet.")]));
-  if (activeRound?.game === g) markActive(true);
+  markActive(true);
 }
 
-const BAR_SCALE = 180;   // seconds that fill a round's bar; a typical round is ~2:20
 function roundRow(r) {
-  const span = Math.max(r.finish - r.start, 1);
-  const pct = (t) => ((t - r.start) / span) * 100;
-  const bar = el("div", { class: "rbar", style: `width:${Math.min(100, Math.max(30, (span / BAR_SCALE) * 100))}%`,
-    title: "Click to jump to that moment" });
-  for (const s of [r.pre, r.live, r.post, r.end].filter(Boolean)) {
-    bar.append(el("div", { class: `seg ${PHASE[s.phase].cls}`, style: `left:${pct(s.start)}%;width:${((s.end - s.start) / span) * 100}%` }));
+  let sc;
+  if (r.after) {
+    const [a, b] = r.after;
+    sc = el("span", { class: "sc", title: `Score after the round: ${a}–${b}. The side that took it is highlighted.` },
+      r.winner === "l" ? el("b", {}, String(a)) : String(a), "–", r.winner === "r" ? el("b", {}, String(b)) : String(b));
+  } else {
+    sc = el("span", { class: "sc", title: "Score when the round started (the result was not read)" }, scoreText(r.score));
   }
-  for (const p of r.timeouts) {
-    const a = Math.max(p.start, r.start), b = Math.min(p.end, r.finish);
-    bar.append(el("div", { class: "to", style: `left:${pct(a)}%;width:${((b - a) / span) * 100}%` }));
-  }
-  const mph = el("div", { class: "mph" });
-  bar.append(mph);
-  const timeAt = (e) => { const b = bar.getBoundingClientRect(); return r.start + Math.min(Math.max((e.clientX - b.left) / b.width, 0), 1) * span; };
-  bar.addEventListener("click", (e) => { e.stopPropagation(); seek(timeAt(e)); });
-  bar.addEventListener("mousemove", (e) => { const t = timeAt(e); showTip(e, describe(t, r), fmt(t)); });
-  bar.addEventListener("mouseleave", hideTip);
-
-  const flags = [r.post ? el("i", { class: "f-plant" }) : null, r.timeouts.length ? el("i", { class: "f-to" }) : null];
-  const row = el("div", { class: "rrow", title: `Round ${r.round}: click to jump to the buy phase`, onclick: () => seek(r.start) },
-    el("span", { class: "no" }, `R${r.round}`),
-    el("span", { class: "sc", title: "Score when the round started" }, scoreText(r.score)),
-    el("div", {}, bar),
-    el("span", { class: "len", title: "Live round length, including the post-plant" }, fmt(r.playTime)),
-    el("span", { class: "flags", title: [r.post ? "spike planted" : "", r.timeouts.length ? "timeout" : ""].filter(Boolean).join(", ") }, ...flags));
-
-  const chips = [];
-  r.secs = [];
-  for (const [s, cls, name] of [[r.pre, "pre", "Buy"], [r.live, "live", "Live"], [r.post, "post", "Planted"], [r.end, "end", "End"]]) {
-    if (!s) continue;
-    const c = el("button", { class: `pchip ${cls}`, title: `Jump to ${name.toLowerCase()} at ${fmt(s.start)}`, onclick: () => seek(s.start) },
-      el("b", {}, name), el("span", {}, fmt(s.end - s.start)));
-    chips.push(c);
-    r.secs.push({ seg: s, el: c });
-  }
-  for (const p of r.timeouts) {
-    chips.push(el("button", { class: "pchip to", title: `Timer stuck at ${p.timer}. Jump to the timeout at ${fmt(p.start)}`, onclick: () => seek(p.start) },
-      el("b", {}, "Timeout"), el("span", {}, fmt(p.end - p.start))));
-  }
-  const offs = [30, 60, 90].filter((o) => r.liveStart + o < r.finish - 3);
-  const detail = el("div", { class: "rdetail" }, el("div", { class: "chips" }, ...chips),
-    offs.length ? el("div", { class: "jump" }, "Into the live round:", ...offs.map((o) => el("button", { onclick: () => seek(r.liveStart + o) }, `+${fmt(o)}`))) : null);
-  r.mph = mph; r.pct = pct;
-  return el("div", { class: "round", "data-key": r.key }, row, detail);
+  const marks = el("span", { class: "marks" },
+    r.post ? el("i", { class: "plant", title: "Spike planted" }) : null,
+    r.timeouts.length ? el("span", { title: "Timeout during this round" }, "timeout") : null);
+  return el("div", { class: "rrow", "data-key": r.key, title: `Jump to round ${r.round}`, onclick: () => seek(r.start) },
+    el("span", { class: "no" }, `R${r.round}`), sc, marks,
+    el("span", { class: "len", title: "Live round length, including the post-plant" }, fmt(r.playTime)));
 }
 
 function markActive(scroll) {
-  document.querySelectorAll(".round.now").forEach((n) => n.classList.remove("now"));
+  document.querySelectorAll(".rrow.now").forEach((n) => n.classList.remove("now"));
   if (!activeRound) return;
-  const node = document.querySelector(`.round[data-key="${activeRound.key}"]`);
+  const node = document.querySelector(`.rrow[data-key="${activeRound.key}"]`);
   if (!node) return;
   node.classList.add("now");
-  if (scroll && $("#follow").checked) {
+  if (scroll) {
     const panel = $("#rounds");
     const top = node.offsetTop - panel.offsetTop;
-    if (top < panel.scrollTop + 20 || top > panel.scrollTop + panel.clientHeight - 120) panel.scrollTo({ top: top - panel.clientHeight * 0.25, behavior: "smooth" });
+    if (top < panel.scrollTop + 10 || top > panel.scrollTop + panel.clientHeight - 60) panel.scrollTo({ top: top - panel.clientHeight * 0.3, behavior: "smooth" });
   }
 }
 
-/* what is happening at video time t, phrased for a coach */
-function describe(t, r) {
-  const s = segAt(t);
-  if (!s || s.game == null) return "Dead time";
-  r = r || roundOf(s);
-  const base = `Game ${s.game} · Round ${s.round}`;
-  if (s.phase === "PRE_ROUND") return `${base} · Buy phase, live in ${fmt(Math.max(0, r.liveStart - t))}`;
-  if (s.phase === "ROUND_END") return `${base} · Round end`;
-  return `${base} · ${PHASE[s.phase].name}, ${fmt(t - r.liveStart)} in`;
+/* round bar under the video */
+let phaseEls = [];
+function renderRoundBar(r, s) {
+  const box = $("#phases");
+  phaseEls = [];
+  if (!r) {
+    const next = rounds.find((x) => x.start > ($("#video").currentTime || 0));
+    $("#rb-game").textContent = "";
+    $("#rb-round").textContent = s ? "Between rounds" : "–";
+    $("#rb-score").textContent = "";
+    box.replaceChildren(el("div", { class: "between" },
+      next ? el("span", {}, `Up next: ${games.length > 1 ? `Game ${next.game}, ` : ""}Round ${next.round}`) : el("span", {}, "No more rounds after this point"),
+      next ? el("button", { onclick: () => seek(next.start) }, "Jump there") : null));
+    return;
+  }
+  $("#rb-game").textContent = games.length > 1 ? `Game ${r.game}` : "";
+  $("#rb-round").textContent = `Round ${r.round}`;
+  $("#rb-score").textContent = scoreText(r.score);
+  const items = PHASES.map(([slot, name, none], i) => {
+    const seg = r[slot];
+    const b = el("button", {
+      class: "phase" + (seg ? "" : " missing"), disabled: !seg,
+      title: seg ? `${name}: starts at ${fmt(seg.start)}  (key ${i + 1})` : none,
+      onclick: () => seg && seek(seg.start),
+    }, el("span", { class: "n" }, seg ? name : none), el("span", { class: "d" }, seg ? fmt(seg.end - seg.start) : "–"),
+    el("kbd", {}, String(i + 1)), el("i", { class: "fill" }));
+    if (seg) phaseEls.push({ seg, el: b, fill: b.lastChild });
+    return b;
+  });
+  for (const p of r.timeouts) {
+    items.push(el("button", { class: "phase timeout", title: `Timer frozen at ${p.timer}. Jump to the timeout at ${fmt(p.start)}`, onclick: () => seek(p.start) },
+      el("span", { class: "n" }, "Timeout"), el("span", { class: "d" }, fmt(p.end - p.start))));
+  }
+  box.replaceChildren(...items);
 }
 
-function showTip(e, text, sub) {
-  const tip = $("#tip");
-  tip.hidden = false;
-  tip.replaceChildren(text, el("small", {}, sub || ""));
-  tip.style.left = `${Math.min(e.clientX + 14, innerWidth - tip.offsetWidth - 8)}px`;
-  tip.style.top = `${e.clientY + 16}px`;
+function statusText(r, s, t, p) {
+  if (!r) return s ? "Menus, lobby or a break" : "";
+  if (p) return `Timeout · ${fmt(t - p.start)} in · timer frozen at ${p.timer}`;
+  if (s.phase === "PRE_ROUND") return `Live in ${fmt(Math.max(0, r.liveStart - t))}`;
+  if (s.phase === "ROUND") return `${fmt(t - r.liveStart)} into the round`;
+  if (s.phase === "POST_PLANT") return `${fmt(t - s.start)} after the plant · ${fmt(t - r.liveStart)} into the round`;
+  return "Round over";
 }
-function hideTip() { $("#tip").hidden = true; }
 
 function seek(t) {
   const v = $("#video");
@@ -680,54 +673,37 @@ function segAt(t) {
 const pauseAt = (t) => pauses.find((p) => t >= p.start && t <= p.end + 1 && p.end - p.start >= 5);
 const roundOf = (s) => (s && s.game != null ? rounds.find((r) => r.game === s.game && r.round === s.round) : null);
 
-let activeKey = null, activeRound = null, nowKey = "";
+let activeKey, activeRound = null, statusKey = "", playingGame = null;
 function update() {
   if (view !== "viewer" || !current) return;
   const t = $("#video").currentTime || 0;
-  const ph = $("#playhead");
-  if (ph) ph.style.left = `${(t / duration) * 100}%`;
   const s = segAt(t), p = pauseAt(t);
-  updateNow(s, t, p);
-
-  const rk = s?.game != null ? `${s.game}:${s.round}` : null;
-  if (rk !== activeKey) {
-    if (activeRound) for (const sec of activeRound.secs || []) sec.el.classList.remove("active");
-    activeKey = rk;
-    activeRound = rk ? roundOf(s) : null;
-    if (activeRound && activeRound.game !== shownGame && $("#follow").checked) showGame(activeRound.game);
-    else { markActive(true); if (games.length > 1) showGame(shownGame); }
-    const band = $("#round-band");
-    band.style.display = activeRound ? "block" : "none";
-    if (activeRound) {
-      band.style.left = `${(activeRound.start / duration) * 100}%`;
-      band.style.width = `${Math.max(((activeRound.finish - activeRound.start) / duration) * 100, 0.3)}%`;
-    }
+  const r = roundOf(s);
+  const key = r ? r.key : s ? "between" : null;
+  if (key !== activeKey) {
+    activeKey = key;
+    activeRound = r;
+    renderRoundBar(r, s);
+    // follow playback into another game, but leave a tab the coach picked alone otherwise
+    if (r && r.game !== playingGame && r.game !== shownGame) showGame(r.game);
+    else { markActive(true); if (games.length > 1) refreshTabs(); }
+    if (r) playingGame = r.game;
   }
-  if (activeRound) {
-    for (const sec of activeRound.secs || []) sec.el.classList.toggle("active", t >= sec.seg.start && t < sec.seg.end);
-    if (activeRound.mph) activeRound.mph.style.left = `${activeRound.pct(Math.min(Math.max(t, activeRound.start), activeRound.finish))}%`;
+  for (const ph of phaseEls) {
+    const on = t >= ph.seg.start && t < ph.seg.end;
+    ph.el.classList.toggle("on", on);
+    ph.el.classList.toggle("past", !on && t >= ph.seg.end);
+    ph.fill.style.width = on ? `${((t - ph.seg.start) / Math.max(ph.seg.end - ph.seg.start, 0.1)) * 100}%` : "0";
   }
+  const st = statusText(r, s, t, p);
+  if (st !== statusKey) { statusKey = st; $("#rb-status").textContent = st; }
 }
-
-function updateNow(s, t, p) {
-  let cls, phase, where = "", score = "", time;
-  if (!s || s.game == null) { cls = "dead"; phase = "Dead time"; time = "menus, lobby or break"; }
-  else {
-    const r = roundOf(s);
-    cls = PHASE[s.phase].cls; phase = PHASE[s.phase].name;
-    where = `${games.length > 1 ? `Game ${s.game} · ` : ""}Round ${s.round}`;
-    score = scoreText(r?.score);
-    if (s.phase === "PRE_ROUND") time = `live in ${fmt(Math.max(0, r.liveStart - t))}`;
-    else if (s.phase === "ROUND_END") time = "round over";
-    else time = `${fmt(t - r.liveStart)} into the round`;
-    if (p) { cls = "paused"; phase = "Timeout"; time = `${fmt(t - p.start)} in · timer stuck at ${p.timer}`; }
+function refreshTabs() {
+  for (const [i, b] of [...$("#game-tabs").children].entries()) {
+    b.querySelector(".live-dot")?.remove();
+    const g = games[i]?.game;
+    if (activeRound?.game === g && g !== shownGame) b.append(el("span", { class: "live-dot", title: "Playing" }));
   }
-  const key = [cls, phase, where, score, time].join("|");
-  if (key === nowKey) return;
-  nowKey = key;
-  $("#now").className = cls;
-  $("#now-phase").textContent = phase; $("#now-where").textContent = where;
-  $("#now-score").textContent = score; $("#now-time").textContent = time;
 }
 
 function autoSkip() {
@@ -793,6 +769,10 @@ document.addEventListener("keydown", (e) => {
   if (view !== "viewer") return;
   if (e.key === "]") stepRound(1);
   else if (e.key === "[") stepRound(-1);
+  else if (/^[1-4]$/.test(e.key) && activeRound) {
+    const seg = activeRound[PHASES[Number(e.key) - 1][0]];
+    if (seg) seek(seg.start);
+  }
 });
 
 /* ---------- boot ---------- */

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Coach dnunz</title>
-<link rel="stylesheet" href="style.css?v=3">
+<link rel="stylesheet" href="style.css?v=4">
 </head>
 <body>
 <header id="topbar">
@@ -67,45 +67,35 @@
       <div id="left">
         <div id="stage"><video id="video" controls preload="metadata"></video></div>
 
-        <div id="now" class="dead">
-          <span id="now-phase" class="phase-pill">–</span>
-          <b id="now-where"></b>
-          <span id="now-score" class="score"></span>
-          <span id="now-time" class="muted"></span>
-        </div>
-
-        <div id="controls">
-          <div class="group">
-            <button id="prev" title="Previous round  [">◀ Round</button>
-            <button id="next" title="Next round  ]">Round ▶</button>
+        <!-- the round being watched: the main way around a VOD -->
+        <div id="roundbar">
+          <div class="rb-top">
+            <button id="prev" class="step" title="Previous round  [">‹</button>
+            <div class="rb-title">
+              <span id="rb-game" class="muted"></span>
+              <b id="rb-round">–</b>
+              <span id="rb-score" class="score"></span>
+            </div>
+            <button id="next" class="step" title="Next round  ]">›</button>
+            <span id="rb-status" class="muted"></span>
+            <div class="spacer"></div>
+            <label class="switch small" title="Jump over menus, lobby and timeouts while playing">
+              <input type="checkbox" id="skip" checked><span></span> Skip dead time
+            </label>
+            <div class="seg-ctl" id="speed" role="group" aria-label="Playback speed">
+              <button data-v="1" class="on">1×</button><button data-v="1.5">1.5×</button><button data-v="2">2×</button>
+            </div>
           </div>
-          <label class="switch" title="Jump over menus, lobby and timeouts while playing">
-            <input type="checkbox" id="skip" checked><span></span> Skip dead time
-          </label>
-          <div class="seg-ctl" id="speed" role="group" aria-label="Playback speed">
-            <button data-v="1" class="on">1×</button><button data-v="1.5">1.5×</button><button data-v="2">2×</button><button data-v="3">3×</button>
-          </div>
-          <div class="spacer"></div>
-          <span class="muted small keys"><kbd>[</kbd> <kbd>]</kbd> rounds</span>
-        </div>
-
-        <div id="timeline-wrap">
-          <div id="tl-games"></div>
-          <div id="timeline"><div id="tl-pauses"></div></div>
-          <div id="legend">
-            <span><i class="k pre"></i>Buy phase</span><span><i class="k live"></i>Live</span>
-            <span><i class="k post"></i>Post-plant</span><span><i class="k end"></i>Round end</span>
-            <span><i class="k pause"></i>Timeout</span>
-          </div>
+          <div id="phases"></div>
         </div>
       </div>
 
       <aside id="right">
         <div id="rounds-head">
           <div id="game-tabs" role="tablist"></div>
-          <label class="switch small" title="Keep the round being watched in view"><input type="checkbox" id="follow" checked><span></span> Follow</label>
         </div>
         <div id="rounds"></div>
+        <div id="rounds-foot" class="muted small"><kbd>[</kbd><kbd>]</kbd> rounds · <kbd>1</kbd>–<kbd>4</kbd> phases</div>
       </aside>
     </div>
   </section>
@@ -145,8 +135,7 @@
 
 <div id="drop-overlay" hidden><div>Drop to add these videos</div></div>
 <div id="menu" class="menu" hidden></div>
-<div id="tip" hidden></div>
 <div id="toast" hidden></div>
-<script src="app.js?v=3"></script>
+<script src="app.js?v=4"></script>
 </body>
 </html>

@@ -23,8 +23,9 @@ Works today, on one sample stream:
 - Add several videos and YouTube links at once; they download and process side by side.
 - Detects games, rounds, and the phases inside each round: **Buy phase**, **Live**,
   **Post-plant**, **Round end**, plus **Timeouts**, dead time between games, and the score.
-- A searchable library with thumbnails, and a viewer with one timeline for the whole VOD and a
-  compact round list that expands the round being watched.
+- A searchable library with thumbnails, and a viewer built around rounds: pick a game and round
+  on the right (with the score and which side took it), then jump between its buy phase, live
+  round, post-plant and round end under the video.
 
 Not done yet:
 
@@ -58,7 +59,8 @@ For developers: `uv run python launch.py --no-browser`, or `uv run uvicorn app.m
 
 Click **Add VODs** (or drop video files anywhere on the page) and paste YouTube links one per
 line. Progress shows under "In progress", and each VOD joins the library when it is ready.
-Press `/` to search, `[` and `]` to step through rounds, and click a VOD's name to rename it.
+Press `/` to search, `[` and `]` to step through rounds, `1`-`4` to jump to a round's phases, and
+click a VOD's name to rename it.
 
 Recording tip for future sessions: in OBS you can record the mic, Discord, and game audio as
 separate tracks inside one file. That will make transcription and speaker separation far
