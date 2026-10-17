@@ -17,7 +17,8 @@ CREATE TABLE IF NOT EXISTS vods (
     error TEXT DEFAULT '',
     duration REAL DEFAULT 0,
     created_at REAL NOT NULL,
-    source_url TEXT DEFAULT ''
+    source_url TEXT DEFAULT '',
+    our_side TEXT DEFAULT 'l'      -- which HUD score is the team being coached: 'l' or 'r'
 )
 """
 
@@ -27,8 +28,11 @@ def connect():
     con = sqlite3.connect(DATA / "library.db", check_same_thread=False, timeout=30)
     con.row_factory = sqlite3.Row
     con.execute(SCHEMA)
-    if "source_url" not in {r[1] for r in con.execute("PRAGMA table_info(vods)")}:
-        con.execute("ALTER TABLE vods ADD COLUMN source_url TEXT DEFAULT ''")   # older libraries
+    cols = {r[1] for r in con.execute("PRAGMA table_info(vods)")}
+    if "source_url" not in cols:                                  # older libraries
+        con.execute("ALTER TABLE vods ADD COLUMN source_url TEXT DEFAULT ''")
+    if "our_side" not in cols:
+        con.execute("ALTER TABLE vods ADD COLUMN our_side TEXT DEFAULT 'l'")
     return con
 
 

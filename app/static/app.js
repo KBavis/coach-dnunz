@@ -497,9 +497,20 @@ let shownGame = null;
 const PHASES = [            // [slot, label, label when the round has none]
   ["pre", "Buy phase", "No buy phase"],
   ["live", "Live", "No live phase"],
-  ["post", "Post-plant", "No plant"],
+  ["post", "Planted", "No plant"],
   ["end", "Round end", "Round end"],
 ];
+const ROUND_CLOCK = 100, SPIKE_CLOCK = 45;    // Valorant's round timer and spike timer, in seconds
+const dur = (sec) => {                         // a length, written so it never looks like a timestamp
+  sec = Math.max(0, Math.round(sec));
+  return sec < 60 ? `${sec}s` : `${Math.floor(sec / 60)}m ${String(sec % 60).padStart(2, "0")}s`;
+};
+const SPIKE_SVG = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.6 13.6 4.8v6.4L8 14.4 2.4 11.2V4.8z" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="8" cy="8" r="2.1" fill="currentColor"/></svg>';
+const spikeIcon = () => { const i = el("span", { class: "spike-ico" }); i.innerHTML = SPIKE_SVG; return i; };
+let ourSide = "l";
+const known = (sc) => sc && sc[0] != null && sc[1] != null;
+const oursFirst = (sc) => (ourSide === "l" ? sc : [sc[1], sc[0]]);
+const resultOf = (r) => (r.winner ? (r.winner === ourSide ? "w" : "l") : null);
 
 async function openVod(id) {
   let d;
@@ -523,6 +534,8 @@ async function openVod(id) {
   duration = res.duration || d.duration;
   rounds = buildRounds(res);
   activeKey = undefined; activeRound = null; shownGame = null; playingGame = null;
+  ourSide = d.our_side === "r" ? "r" : "l";
+  renderSide();
   $("#v-name").textContent = d.name;
   $("#v-meta").textContent = [fmt(duration), plural(games.length, "game"), plural(rounds.length, "round")].join(" · ");
   const v = $("#video");
@@ -553,7 +566,6 @@ function buildRounds(result) {
     return r;
   }).sort((a, b) => a.start - b.start);
   // who took the round: the side whose score is one higher when the next round starts
-  const known = (sc) => sc && sc[0] != null && sc[1] != null;
   list.forEach((r, i) => {
     const next = list[i + 1];
     // the next round's score, or for a game's last round the score shown at its round end
@@ -566,13 +578,18 @@ function buildRounds(result) {
   return list;
 }
 
-const scoreText = (sc) => (sc && sc[0] != null && sc[1] != null ? `${sc[0]}–${sc[1]}` : "");
+const scoreText = (sc) => (known(sc) ? oursFirst(sc).join("–") : "");   // ours first
 
 /* rounds panel */
 function showGame(g) {
   shownGame = g;
   $("#game-tabs").replaceChildren(...games.map((x) => el("button", {
-    class: x.game === g ? "on" : "", role: "tab", onclick: () => showGame(x.game),
+    class: x.game === g ? "on" : "", role: "tab", title: `Jump to game ${x.game}, round 1`,
+    onclick: () => {
+      const first = rounds.find((r) => r.game === x.game);
+      if (x.game !== activeRound?.game && first) seek(first.start);   // another game: start at its round 1
+      showGame(x.game);
+    },
   }, games.length > 1 ? `Game ${x.game}` : "Rounds", el("span", { class: "final" }, `${x.rounds}`),
   activeRound?.game === x.game && x.game !== g ? el("span", { class: "live-dot", title: "Playing" }) : null)));
   const list = rounds.filter((r) => r.game === g);
@@ -582,21 +599,33 @@ function showGame(g) {
 }
 
 function roundRow(r) {
-  let sc;
-  if (r.after) {
-    const [a, b] = r.after;
-    sc = el("span", { class: "sc", title: `Score after the round: ${a}–${b}. The side that took it is highlighted.` },
-      r.winner === "l" ? el("b", {}, String(a)) : String(a), "–", r.winner === "r" ? el("b", {}, String(b)) : String(b));
-  } else {
-    sc = el("span", { class: "sc", title: "Score when the round started (the result was not read)" }, scoreText(r.score));
-  }
+  const res = resultOf(r);
+  const sc = r.after
+    ? el("span", { class: "sc", title: "Score after the round, your team first" }, scoreText(r.after))
+    : el("span", { class: "sc faint", title: "Score going into the round, your team first (its result was not read)" }, scoreText(r.score));
   const marks = el("span", { class: "marks" },
-    r.post ? el("i", { class: "plant", title: "Spike planted" }) : null,
-    r.timeouts.length ? el("span", { title: "Timeout during this round" }, "timeout") : null);
-  return el("div", { class: "rrow", "data-key": r.key, title: `Jump to round ${r.round}`, onclick: () => seek(r.start) },
-    el("span", { class: "no" }, `R${r.round}`), sc, marks,
-    el("span", { class: "len", title: "Live round length, including the post-plant" }, fmt(r.playTime)));
+    r.post ? el("span", { class: "planted", title: "Spike planted" }, spikeIcon(), "Planted") : null,
+    r.timeouts.length ? el("span", { class: "to-mark", title: "Timeout during this round" }, "Timeout") : null);
+  return el("div", { class: "rrow" + (res ? ` ${res}` : ""), "data-key": r.key, title: `Jump to round ${r.round}`, onclick: () => seek(r.start) },
+    el("span", { class: "no" }, `R${r.round}`),
+    el("span", { class: "res" + (res ? ` ${res}` : ""), title: res === "w" ? "Won" : res === "l" ? "Lost" : "" }, res ? res.toUpperCase() : ""),
+    sc, marks,
+    el("span", { class: "len", title: "How long the round was live, including the post-plant" }, dur(r.playTime)));
 }
+
+function renderSide() {
+  for (const b of $("#side").querySelectorAll("button")) b.classList.toggle("on", b.dataset.v === ourSide);
+}
+$("#side").addEventListener("click", async (e) => {
+  const b = e.target.closest("button");
+  if (!b || !current || b.dataset.v === ourSide) return;
+  ourSide = b.dataset.v;
+  renderSide();
+  showGame(shownGame);
+  renderRoundBar(activeRound, segAt($("#video").currentTime || 0));
+  try { await api(`/api/vods/${current.id}`, json("PATCH", { our_side: ourSide })); current.our_side = ourSide; }
+  catch (err) { toast(err.message, true); }
+});
 
 function markActive(scroll) {
   document.querySelectorAll(".rrow.now").forEach((n) => n.classList.remove("now"));
@@ -616,6 +645,10 @@ let phaseEls = [];
 function renderRoundBar(r, s) {
   const box = $("#phases");
   phaseEls = [];
+  const res = r ? resultOf(r) : null;
+  $("#rb-result").className = "res" + (res ? ` ${res}` : "");
+  $("#rb-result").textContent = res === "w" ? "Won" : res === "l" ? "Lost" : "";
+  renderClock(r);
   if (!r) {
     const next = rounds.find((x) => x.start > ($("#video").currentTime || 0));
     $("#rb-game").textContent = "";
@@ -629,32 +662,83 @@ function renderRoundBar(r, s) {
   $("#rb-game").textContent = games.length > 1 ? `Game ${r.game}` : "";
   $("#rb-round").textContent = `Round ${r.round}`;
   $("#rb-score").textContent = scoreText(r.score);
+  $("#rb-score").title = "Score going into the round, your team first";
   const items = PHASES.map(([slot, name, none], i) => {
     const seg = r[slot];
     const b = el("button", {
-      class: "phase" + (seg ? "" : " missing"), disabled: !seg,
-      title: seg ? `${name}: starts at ${fmt(seg.start)}  (key ${i + 1})` : none,
+      class: "phase" + (seg ? "" : " missing") + (slot === "post" && seg ? " plant" : ""), disabled: !seg,
+      title: seg ? `Jump to ${name.toLowerCase()} (key ${i + 1})` : none,
       onclick: () => seg && seek(seg.start),
-    }, el("span", { class: "n" }, seg ? name : none), el("span", { class: "d" }, seg ? fmt(seg.end - seg.start) : "–"),
+    }, el("span", { class: "n" }, slot === "post" && seg ? spikeIcon() : null, seg ? name : none),
+    el("span", { class: "d" }, seg ? dur(seg.end - seg.start) : ""),
     el("kbd", {}, String(i + 1)), el("i", { class: "fill" }));
     if (seg) phaseEls.push({ seg, el: b, fill: b.lastChild });
     return b;
   });
   for (const p of r.timeouts) {
-    items.push(el("button", { class: "phase timeout", title: `Timer frozen at ${p.timer}. Jump to the timeout at ${fmt(p.start)}`, onclick: () => seek(p.start) },
-      el("span", { class: "n" }, "Timeout"), el("span", { class: "d" }, fmt(p.end - p.start))));
+    items.push(el("button", { class: "phase timeout", title: `Timer frozen at ${p.timer}. Jump to the timeout.`, onclick: () => seek(p.start) },
+      el("span", { class: "n" }, "Timeout"), el("span", { class: "d" }, dur(p.end - p.start))));
   }
   box.replaceChildren(...items);
 }
 
+/* round clock: the live round on the game's own timer, click anywhere to jump there */
+let clockRound = null;
+function clockSpan(r) { return [r.liveStart, Math.max(r.finish, r.liveStart + 1)]; }
+function renderClock(r) {
+  clockRound = r && (r.live || r.post) ? r : null;
+  $("#clock").hidden = !clockRound;
+  if (!clockRound) return;
+  const [a, b] = clockSpan(r);
+  const pct = (t) => `${((t - a) / (b - a)) * 100}%`;
+  const bar = $("#clock-bar");
+  bar.querySelectorAll(".zone").forEach((z) => z.remove());
+  const liveEnd = (r.post || r.end || { start: b }).start;
+  if (r.post) bar.prepend(el("i", { class: "zone post", style: `left:${pct(r.post.start)};width:${((r.post.end - r.post.start) / (b - a)) * 100}%` }));
+  if (r.end) bar.prepend(el("i", { class: "zone end", style: `left:${pct(r.end.start)};right:0` }));
+  const ticks = [];
+  for (let k = 0; k * 20 <= ROUND_CLOCK; k++) {
+    const t = a + k * 20;
+    if (t > liveEnd - 6) break;
+    ticks.push(el("button", { class: "tick", style: `left:${pct(t)}`, title: `Jump to ${fmt(ROUND_CLOCK - k * 20)} on the round clock`, onclick: () => seek(t) }, fmt(ROUND_CLOCK - k * 20)));
+  }
+  if (r.post) ticks.push(el("button", { class: "tick spike", style: `left:${pct(r.post.start)}`, title: "Jump to the plant", onclick: () => seek(r.post.start) }, spikeIcon(), "Plant"));
+  $("#clock-ticks").replaceChildren(...ticks);
+}
+const clockTime = (e) => {
+  const [a, b] = clockSpan(clockRound), box = $("#clock-bar").getBoundingClientRect();
+  return a + Math.min(Math.max((e.clientX - box.left) / box.width, 0), 1) * (b - a);
+};
+$("#clock-bar").addEventListener("click", (e) => { if (clockRound) seek(clockTime(e)); });
+$("#clock-bar").addEventListener("mousemove", (e) => {
+  if (!clockRound) return;
+  const t = clockTime(e), [a, b] = clockSpan(clockRound);
+  $("#clock-ghost").style.left = `${((t - a) / (b - a)) * 100}%`;
+  showTip(e, clockAt(clockRound, t), "click to jump here");
+});
+$("#clock-bar").addEventListener("mouseleave", hideTip);
+
+/* where in the round a moment is, the way the game shows it */
+function clockAt(r, t) {
+  if (t < r.liveStart) return `Buy phase · ${dur(r.liveStart - t)} left`;
+  if (r.end && t >= r.end.start) return "Round over";
+  if (r.post && t >= r.post.start) return `Spike planted · ${dur(SPIKE_CLOCK - (t - r.post.start))} left`;
+  return `Round clock ${fmt(Math.max(0, ROUND_CLOCK - (t - r.liveStart)))}`;
+}
 function statusText(r, s, t, p) {
   if (!r) return s ? "Menus, lobby or a break" : "";
-  if (p) return `Timeout · ${fmt(t - p.start)} in · timer frozen at ${p.timer}`;
-  if (s.phase === "PRE_ROUND") return `Live in ${fmt(Math.max(0, r.liveStart - t))}`;
-  if (s.phase === "ROUND") return `${fmt(t - r.liveStart)} into the round`;
-  if (s.phase === "POST_PLANT") return `${fmt(t - s.start)} after the plant · ${fmt(t - r.liveStart)} into the round`;
-  return "Round over";
+  if (p) return `Timeout · ${dur(t - p.start)} so far`;
+  return clockAt(r, t);
 }
+
+function showTip(e, text, sub) {
+  const tip = $("#tip");
+  tip.hidden = false;
+  tip.replaceChildren(text, sub ? el("small", {}, sub) : "");
+  tip.style.left = `${Math.min(e.clientX + 14, innerWidth - tip.offsetWidth - 8)}px`;
+  tip.style.top = `${e.clientY - 44}px`;
+}
+function hideTip() { $("#tip").hidden = true; }
 
 function seek(t) {
   const v = $("#video");
@@ -694,6 +778,12 @@ function update() {
     ph.el.classList.toggle("on", on);
     ph.el.classList.toggle("past", !on && t >= ph.seg.end);
     ph.fill.style.width = on ? `${((t - ph.seg.start) / Math.max(ph.seg.end - ph.seg.start, 0.1)) * 100}%` : "0";
+  }
+  if (clockRound) {
+    const [a, b] = clockSpan(clockRound);
+    const head = $("#clock-head");
+    head.style.left = `${Math.min(Math.max((t - a) / (b - a), 0), 1) * 100}%`;
+    head.classList.toggle("dim", t < a);
   }
   const st = statusText(r, s, t, p);
   if (st !== statusKey) { statusKey = st; $("#rb-status").textContent = st; }
