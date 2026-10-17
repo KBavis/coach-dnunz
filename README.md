@@ -33,11 +33,23 @@ overlays and non-1080p layouts (720p sources read noticeably worse).
 ## Running it
 
 `start.bat` (Windows) and `start.sh` (WSL, Linux, macOS) install [uv](https://docs.astral.sh/uv/)
-if missing, then `uv run --extra engine python launch.py`, which installs Python 3.12 and the
-dependencies, fetches ffmpeg, picks a free port from 8000 and opens the browser. Both scripts
-pass their arguments on (`--no-browser`).
+if missing, then run `launch.py` through `uv run --extra engine`, which installs Python 3.12 and
+the dependencies and fetches ffmpeg. The launcher picks a free port from 8000, records it in
+`data/coach.port` (so a second start just opens the running app) and opens the browser.
 
-Developer equivalent:
+`launch.py` has three modes:
+
+- **default** (`start.sh`, `start.bat --console`): runs in the terminal.
+- **`--prepare`** (what `start.bat` runs): finishes setup, creates "Coach Dnunz" shortcuts on the
+  Desktop and in the Start menu, starts the tray app, waits until it answers, and exits so the
+  console closes. On failure it prints the tray app's log and stays open.
+- **`--tray`** (what the shortcuts run, under `pythonw.exe`): no console; a system-tray icon
+  (pystray) with Open / Show log / Quit. Output goes to `data/coach.log`; a fatal error shows a
+  message box. Quit stops the server and kills running jobs, which resume on the next start.
+  Child processes are started with `CREATE_NO_WINDOW` and `python.exe`, so ffmpeg, yt-dlp and the
+  pipeline never open a console window.
+
+All modes take `--no-browser`. Developer equivalent:
 
     uv run --extra engine python launch.py --no-browser
     uv run --extra engine uvicorn app.main:app --port 8000      # without the launcher
@@ -57,6 +69,8 @@ both Windows and WSL. Python is pinned to 3.12 (`.python-version`; `rapidocr-onn
 | `COACH_GPU` | 1 | `0` disables NVIDIA GPU decoding |
 | `COACH_WORKERS` | set per job | OCR worker processes per analysis |
 | `MIN_MB` | min(4000, 10% of RAM) | Free-memory floor; a job below it is killed |
+| `COACH_SHORTCUT_DIR` | Desktop + Start menu | Where `--prepare` puts the shortcut (tests) |
+| `COACH_TRAY_AUTOQUIT` | unset | Seconds until the tray app quits itself (tests) |
 
 ## How it works
 
@@ -95,7 +109,7 @@ Rebuilding the digit templates from an OCR-labelled VOD:
 
 ### The web app
 
-- `launch.py`: port selection, first-run checks, opens the browser.
+- `launch.py`: port selection, first-run checks, Windows shortcuts and tray app, opens the browser.
 - `app/main.py`: FastAPI. `GET/POST /api/vods`, `POST /api/vods/from-url`,
   `GET/PATCH/DELETE /api/vods/{id}`, `POST /api/vods/{id}/reprocess`, `GET /api/vods/{id}/video`
   (range requests), `GET /api/vods/{id}/thumb.jpg`, `GET /api/config`. Static files are served
@@ -129,7 +143,7 @@ To register an already-processed VOD without copying it:
 
 - `pipeline/`: scanning, HUD reading, segmentation, round results
 - `app/`: FastAPI backend, job pools, SQLite library, static frontend
-- `launch.py`, `start.sh`, `start.bat`, `start.ps1`: one-command start
+- `launch.py`, `start.sh`, `start.bat`, `start.ps1`: one-command start, Windows tray app and shortcuts
 - `SETUP.md`: non-technical setup guide
 
 Recording tip: in OBS you can record the mic, Discord and game audio as separate tracks in one

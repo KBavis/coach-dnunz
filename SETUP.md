@@ -24,7 +24,9 @@ computer. These steps are for Windows. Nothing needs to be installed beforehand.
 
 Make sure you extract it. Opening the zip and double-clicking files inside it won't work.
 
-## 3. Start it
+## 3. Start it the first time
+
+You only do this once. Afterwards you'll use a **Coach Dnunz** icon on your desktop.
 
 1. Open the extracted **coach-dnunz-main** folder.
 2. Double-click the file named **start** whose type is **Windows Batch File**.
@@ -37,9 +39,14 @@ Make sure you extract it. Opening the zip and double-clicking files inside it wo
    This happens because the file was downloaded from the internet.
 
 A black window opens and shows what it is doing. **The first time, it downloads what it needs,
-which can take a few minutes.** Then your web browser opens the app.
+which can take a few minutes.** Then:
 
-Keep the black window open while you use the app. Closing it stops the app.
+- your web browser opens the app,
+- a **Coach Dnunz** icon appears on your **desktop** and in the **Start menu**,
+- and the black window **closes by itself**.
+
+The app keeps running in the background. You'll see its icon (a blue diamond) by the clock in the
+bottom-right corner of the screen. It may be hidden under the small **^** arrow there.
 
 ## 4. Add your recordings
 
@@ -66,25 +73,34 @@ Click a video in the library to open it.
 
 ## Next time
 
-Double-click the same **start** file (type **Windows Batch File**) again. It starts in a few
-seconds, and your library is still there.
+Double-click the **Coach Dnunz** icon on your desktop (or find **Coach Dnunz** in the Start menu).
+It opens in your browser within a few seconds, and your library is still there.
+
+If it's already running, the icon just opens it again. You can also click the blue diamond by the
+clock and choose **Open Coach Dnunz**.
 
 ## Getting a newer version
 
-1. Download and extract the new ZIP (steps 1 and 2) into a new folder.
-2. To keep your library, copy the **data** folder from your old coach-dnunz-main folder into the
+1. Quit Coach Dnunz: right-click the blue diamond by the clock, then **Quit**.
+2. Download and extract the new ZIP (steps 1 and 2) into a new folder.
+3. To keep your library, copy the **data** folder from your old coach-dnunz-main folder into the
    new one.
-3. Start the new one with its **start** file (type **Windows Batch File**).
+4. Double-click the new folder's **start** file (type **Windows Batch File**) once. This updates
+   the desktop icon so it opens the new version. After that, use the icon as usual.
 
 ## If something goes wrong
 
-- **The browser didn't open.** Open your browser and go to **http://localhost:8000** (the black
-  window shows the exact address).
+- **The browser didn't open.** Click the blue diamond by the clock and choose **Open Coach
+  Dnunz**, or open your browser and go to **http://localhost:8000**.
+- **The desktop icon does nothing, or you moved the folder.** Double-click the **start** file
+  (type **Windows Batch File**) in the coach-dnunz-main folder again. It fixes the icon.
 - **The black window says the OCR engine could not load.** Install the Microsoft Visual C++
   Redistributable from **https://aka.ms/vs/17/release/vc_redist.x64.exe**, then double-click
   the **start** file (type **Windows Batch File**) again.
-- **The black window flashed and closed, or shows an error.** Check your internet connection and
-  try again. If it keeps happening, take a screenshot of the black window and send it over.
+- **The black window shows an error (and stays open).** Check your internet connection and try
+  again. If it keeps happening, take a screenshot of the black window and send it over.
+- **Something else isn't working.** Right-click the blue diamond by the clock and choose **Show
+  log**, then send that file over.
 - **A YouTube link failed.** Check that the video is public and the link opens in your browser,
   then click **Retry** on it. If you have the recording as a file, adding that instead is faster.
 - **"No Valorant games found".** The video needs to show Valorant's normal in-game HUD (the timer
@@ -94,4 +110,5 @@ seconds, and your library is still there.
 
 ## Stopping it
 
-Close the black window.
+Right-click the blue diamond by the clock (it may be under the **^** arrow) and choose **Quit**.
+This also stops any video that is still processing; it picks up again next time you start.

@@ -19,5 +19,11 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
 }
 
 Write-Host "[coach] Getting everything ready (the first run downloads Python and libraries, a few minutes)..."
-uv run --extra engine python launch.py @args
+# Default: finish setup, create the "Coach Dnunz" desktop shortcut, start the app in the background
+# (icon by the clock) and close this window. "start.bat --console" keeps the app in this window.
+if ($args -contains "--console") {
+    uv run --extra engine python launch.py @($args | Where-Object { $_ -ne "--console" })
+} else {
+    uv run --extra engine python launch.py --prepare @args
+}
 exit $LASTEXITCODE

@@ -10,6 +10,8 @@ dependencies = [
     "python-multipart",
     "psutil",
     "static-ffmpeg",                # downloads ffmpeg/ffprobe on first use, on any OS
+    "pystray; sys_platform == 'win32'",   # the icon by the clock on Windows (launch.py --tray)
+    "pillow; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]

@@ -121,7 +121,7 @@ def thumb(vod_id: str):
         setup.add_tool_paths()
         subprocess.run([shutil.which("ffmpeg"), "-v", "error", "-y", "-ss", str(at), "-i", str(video),
                         "-frames:v", "1", "-vf", "scale=480:-2", "-q:v", "4", str(out)],
-                       capture_output=True, timeout=60)
+                       capture_output=True, timeout=60, **jobs.NO_WINDOW)
         if not out.exists():
             raise HTTPException(404, "could not make a thumbnail")
     return FileResponse(out, headers={"Cache-Control": "max-age=86400"})

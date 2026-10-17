@@ -8,9 +8,17 @@ import calendar, json, os, queue, re, shutil, subprocess, sys, threading, time
 
 import psutil
 
+from pathlib import Path
+
 from . import db, setup
 
 ROOT = db.ROOT
+# On Windows the tray app runs under pythonw.exe, which has no console. Child processes get a
+# hidden console of their own (CREATE_NO_WINDOW) that everything they start inherits, so ffmpeg or
+# yt-dlp never flash a window; Python children use python.exe so that they have one.
+NO_WINDOW = {"creationflags": 0x08000000} if os.name == "nt" else {}
+_exe = Path(sys.executable)
+PYTHON = str(_exe.with_name("python.exe")) if _exe.name.lower() == "pythonw.exe" and _exe.with_name("python.exe").exists() else sys.executable
 
 
 def _env(**extra):
@@ -58,8 +66,8 @@ def video_path(vod_id):
 def _download(vod_id, url):
     """Fetch a YouTube video with yt-dlp into the VOD's folder. Returns an error string or None."""
     work = work_dir(vod_id)
-    yt = [sys.executable, "-m", "yt_dlp", "--no-playlist"]
-    text = dict(text=True, encoding="utf-8", errors="replace", env=_env())
+    yt = [PYTHON, "-m", "yt_dlp", "--no-playlist"]
+    text = dict(text=True, encoding="utf-8", errors="replace", env=_env(), **NO_WINDOW)
     _update(vod_id, stage="Contacting YouTube", pct=0)
     try:
         t = subprocess.run(yt + ["--print", "title", "--print", YT_DATE_FIELDS, url],
@@ -134,7 +142,7 @@ def file_date(path, fallback=None):
     setup.add_tool_paths()
     try:
         out = subprocess.run([shutil.which("ffprobe"), "-v", "error", "-show_entries", "format_tags=creation_time",
-                              "-of", "default=nw=1:nk=1", str(path)], capture_output=True, text=True, timeout=30).stdout.strip()
+                              "-of", "default=nw=1:nk=1", str(path)], capture_output=True, text=True, timeout=30, **NO_WINDOW).stdout.strip()
         when = calendar.timegm(time.strptime(out[:19], "%Y-%m-%dT%H:%M:%S")) if out else None   # stored as UTC
         if when and when > 1.3e9:                           # ignore placeholder dates (1970, 2000...)
             return when, "recorded"
@@ -218,8 +226,8 @@ def _analyse(vod_id):
     # share the CPU between analyses running side by side
     env = _env(COACH_WORKERS=str(max(1, ((os.cpu_count() or 2) - 1) // ANALYSES)))
     proc = subprocess.Popen(
-        [sys.executable, "-m", "pipeline.run", str(video), str(work)],
-        cwd=ROOT, env=env, stdout=log, stderr=log, stdin=subprocess.DEVNULL)
+        [PYTHON, "-m", "pipeline.run", str(video), str(work)],
+        cwd=ROOT, env=env, stdout=log, stderr=log, stdin=subprocess.DEVNULL, **NO_WINDOW)
     _procs[vod_id] = proc
     min_mb, oom, tick = _min_free_mb(), False, 0
     while proc.poll() is None:
@@ -321,8 +329,8 @@ def _add_dates():
         when = None
         if r["source_url"]:
             try:
-                t = subprocess.run([sys.executable, "-m", "yt_dlp", "--no-playlist", "--skip-download", "--print",
-                                    YT_DATE_FIELDS, r["source_url"]], capture_output=True, text=True, timeout=60, env=_env())
+                t = subprocess.run([PYTHON, "-m", "yt_dlp", "--no-playlist", "--skip-download", "--print",
+                                    YT_DATE_FIELDS, r["source_url"]], capture_output=True, text=True, timeout=60, env=_env(), **NO_WINDOW)
                 when = youtube_date(t.stdout.strip().splitlines()[0] if t.stdout.strip() else "")
             except (OSError, subprocess.TimeoutExpired):
                 pass
@@ -348,8 +356,8 @@ def _add_results():
         ends = [x for x in res["segments"] if x["phase"] == "ROUND_END"]
         if video is None or not ends or res.get("results_version", 1) >= RESULTS_VERSION:
             continue
-        subprocess.run([sys.executable, "-m", "pipeline.banner", str(video), str(work_dir(vod_id))],
-                       cwd=ROOT, env=_env(), capture_output=True, timeout=1800)
+        subprocess.run([PYTHON, "-m", "pipeline.banner", str(video), str(work_dir(vod_id))],
+                       cwd=ROOT, env=_env(), capture_output=True, timeout=1800, **NO_WINDOW)
 
 
 def start():
