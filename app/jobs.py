@@ -3,7 +3,7 @@ memory-guarded subprocess.
 
 Two pools: up to DOWNLOADS YouTube downloads at once (network-bound), and up to ANALYSES
 analyses at once (CPU/GPU-bound; each also decodes on the GPU when there is one, see
-pipeline/extract_hud.py). A finished download goes straight into the analysis queue."""
+pipeline/extract_hud.py). A finished download joins the analysis queue, which runs VODs in the order they were added."""
 import json, os, queue, re, subprocess, sys, threading, time
 
 import psutil
@@ -23,7 +23,7 @@ def _env(**extra):
 DOWNLOADS = int(os.environ.get("COACH_DOWNLOADS", 3))
 ANALYSES = int(os.environ.get("COACH_PARALLEL", 2))
 _downloads: "queue.Queue[str]" = queue.Queue()
-_analyses: "queue.Queue[str]" = queue.Queue()
+_analyses: "queue.PriorityQueue[tuple]" = queue.PriorityQueue()   # (added at, id): oldest first
 _pending: set = set()             # ids waiting in or running through either pool
 _lock = threading.Lock()
 _started = False
@@ -140,7 +140,7 @@ def _fetch(vod_id):
             _update(vod_id, status="failed", error=err)
             return _done(vod_id)
     _update(vod_id, status="queued", stage="Downloaded, waiting for a free analysis slot", pct=0)
-    _analyses.put(vod_id)
+    _analyses.put((_added_at(vod_id), vod_id))
 
 
 def _analyse(vod_id):
@@ -185,6 +185,13 @@ def _analyse(vod_id):
         _update(vod_id, status="failed", error=f"{why}: " + " | ".join(tail))
 
 
+def _added_at(vod_id):
+    con = db.connect()
+    row = con.execute("SELECT created_at FROM vods WHERE id=?", (vod_id,)).fetchone()
+    con.close()
+    return row["created_at"] if row else 0
+
+
 def _done(vod_id):
     with _lock:
         _pending.discard(vod_id)
@@ -194,6 +201,8 @@ def _worker(q, step):
     setup.READY.wait()          # nothing can be processed until setup has finished
     while True:
         vod_id = q.get()
+        if isinstance(vod_id, tuple):               # the analysis queue is ordered by when VODs were added
+            vod_id = vod_id[1]
         try:
             step(vod_id)
         except Exception as e:                      # never let a worker die
@@ -215,7 +224,7 @@ def enqueue(vod_id):
         _downloads.put(vod_id)
     else:
         _update(vod_id, status="queued", stage="Waiting for a free analysis slot", pct=0, error="")
-        _analyses.put(vod_id)
+        _analyses.put((_added_at(vod_id), vod_id))
 
 
 def start():
@@ -229,7 +238,7 @@ def start():
     for _ in range(ANALYSES):
         threading.Thread(target=_worker, args=(_analyses, _analyse), daemon=True).start()
     con = db.connect()
-    stuck = [r["id"] for r in con.execute("SELECT id FROM vods WHERE status IN ('queued','processing')")]
+    stuck = [r["id"] for r in con.execute("SELECT id FROM vods WHERE status IN ('queued','processing') ORDER BY created_at")]
     con.close()
     for vod_id in stuck:
         enqueue(vod_id)

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Coach dnunz</title>
-<link rel="stylesheet" href="style.css?v=2">
+<link rel="stylesheet" href="style.css?v=3">
 </head>
 <body>
 <header id="topbar">
@@ -21,7 +21,11 @@
   <!-- ---------- library ---------- -->
   <section id="library-view">
     <div id="jobs-wrap" hidden>
-      <div class="sec-head"><h3 id="jobs-title">In progress</h3><span id="jobs-note" class="muted small"></span></div>
+      <div class="sec-head">
+        <h3 id="jobs-title">Processing queue</h3><span id="jobs-note" class="muted small"></span>
+        <div class="spacer"></div>
+        <button id="clear-done" class="small-btn" hidden>Clear finished</button>
+      </div>
       <div id="jobs"></div>
     </div>
 
@@ -111,19 +115,27 @@
 <dialog id="add-dialog">
   <form method="dialog" id="add-form">
     <div class="dlg-head"><h2>Add VODs</h2><button value="cancel" class="icon" title="Close">✕</button></div>
-    <label id="drop" tabindex="0">
-      <input id="file" type="file" accept=".mp4,.mkv,.mov,.webm,video/*" multiple hidden>
-      <strong>Drop video files here</strong>
-      <span class="muted">or click to choose · .mp4 .mkv .mov .webm · several at once is fine</span>
-    </label>
-    <ul id="picked"></ul>
-    <label class="field">
-      <span>YouTube links <span class="muted">(one per line)</span></span>
-      <textarea id="links" rows="4" placeholder="https://www.youtube.com/watch?v=…&#10;https://youtu.be/…"></textarea>
-      <small id="links-note" class="muted"></small>
-    </label>
+    <ol class="steps">
+      <li><b>Add</b> video files and YouTube links</li>
+      <li><b>They queue up</b> and process in the order added</li>
+      <li><b>Each opens</b> in your library when ready</li>
+    </ol>
+    <div class="field">
+      <span class="label">YouTube links</span>
+      <div id="link-rows"></div>
+      <button type="button" id="add-link" class="ghost-add">+ Add another link</button>
+    </div>
+    <div class="field">
+      <span class="label">Video files</span>
+      <label id="drop" tabindex="0">
+        <input id="file" type="file" accept=".mp4,.mkv,.mov,.webm,video/*" multiple hidden>
+        <strong>Drop video files here</strong>
+        <span class="muted">or click to choose · .mp4 .mkv .mov .webm · several at once is fine</span>
+      </label>
+      <ul id="picked"></ul>
+    </div>
     <div class="dlg-foot">
-      <span class="muted small">Videos process side by side. You can keep watching meanwhile.</span>
+      <span class="muted small" id="add-summary">Nothing added yet</span>
       <div class="spacer"></div>
       <button value="cancel">Cancel</button>
       <button id="add-go" class="primary" value="default" disabled>Add</button>
@@ -135,6 +147,6 @@
 <div id="menu" class="menu" hidden></div>
 <div id="tip" hidden></div>
 <div id="toast" hidden></div>
-<script src="app.js?v=2"></script>
+<script src="app.js?v=3"></script>
 </body>
 </html>

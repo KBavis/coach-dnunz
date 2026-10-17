@@ -76,6 +76,11 @@ def _summary(vod_id):
     return _summaries[vod_id][1]
 
 
+@app.get("/api/config")
+def config():
+    return {"parallel": jobs.ANALYSES, "downloads": jobs.DOWNLOADS}
+
+
 @app.get("/api/vods")
 def list_vods():
     con = db.connect()
@@ -96,7 +101,10 @@ def thumb(vod_id: str):
             raise HTTPException(404, "no video yet")
         res = _result(vod_id)
         live = [s["start"] for s in (res or {}).get("segments", []) if s["phase"] == "ROUND"]
-        at = live[0] + 20 if live else 60
+        con = db.connect()
+        length = con.execute("SELECT duration FROM vods WHERE id=?", (vod_id,)).fetchone()
+        con.close()
+        at = live[0] + 20 if live else min(60, (length["duration"] if length else 0) * 0.3 or 60)
         setup.add_tool_paths()
         subprocess.run([shutil.which("ffmpeg"), "-v", "error", "-y", "-ss", str(at), "-i", str(video),
                         "-frames:v", "1", "-vf", "scale=480:-2", "-q:v", "4", str(out)],
