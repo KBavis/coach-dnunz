@@ -48,8 +48,11 @@ function toast(msg, bad = false, action = null) {
 }
 
 /* ---------- menus ---------- */
+let menuAnchor = null;
 function openMenu(anchor, items) {
   const m = $("#menu");
+  if (!m.hidden && menuAnchor === anchor) return closeMenu();   // the same ⋯ again closes it
+  menuAnchor = anchor;
   m.replaceChildren(...items.map((it) => el("button", {
     class: it.danger ? "danger" : "", onclick: (e) => { e.stopPropagation(); closeMenu(); it.fn(); },
   }, it.label)));
@@ -58,8 +61,15 @@ function openMenu(anchor, items) {
   m.style.top = `${r.bottom + 4}px`;
   m.style.left = `${Math.max(8, Math.min(r.right - m.offsetWidth, innerWidth - m.offsetWidth - 8))}px`;
 }
-const closeMenu = () => { $("#menu").hidden = true; };
-document.addEventListener("click", (e) => { if (!$("#menu").contains(e.target)) closeMenu(); });
+function closeMenu() { $("#menu").hidden = true; menuAnchor = null; }
+// close on any press outside the menu (capture: other handlers may stop the click), and whenever
+// the menu could end up detached from its button
+document.addEventListener("pointerdown", (e) => {
+  if (!$("#menu").hidden && !$("#menu").contains(e.target) && !menuAnchor?.contains(e.target)) closeMenu();
+}, true);
+document.addEventListener("scroll", () => closeMenu(), true);
+window.addEventListener("resize", () => closeMenu());
+window.addEventListener("hashchange", () => closeMenu());
 
 /* ---------- state ---------- */
 let vods = [];
@@ -168,7 +178,9 @@ function renderJobs() {
       el("div", { class: "q-name", title: j.name }, j.name),
       el("div", { class: "q-stage", title: stage }, stage),
       bar ? el("div", { class: "bar" + (pct == null ? " wait" : "") }, el("div", { style: `width:${pct || 0}%` })) : null),
-    el("div", { class: "q-right" }, right));
+    el("div", { class: "q-right" }, right),
+    j.upload || !["processing", "queued"].includes(j.status) ? el("span") : el("button", {
+      class: "icon q-cancel", title: "Cancel and remove", onclick: () => removeVod(j) }, "✕"));
 
   $("#jobs").replaceChildren(
     ...active.map((j) => {
@@ -227,6 +239,7 @@ function renderGrid() {
   if (key === gridKey) return;
   gridKey = key;
   $("#grid").replaceChildren(...shown.map((v) => card(v, q)));
+  if (menuAnchor && !document.contains(menuAnchor)) closeMenu();
 }
 
 function card(v, q) {
@@ -287,9 +300,14 @@ async function reprocess(v, confirmFirst = false) {
 }
 
 async function removeVod(v) {
-  if (!confirm(`Delete "${v.name}" from the library?\n\nIts breakdown is removed. A file you imported by path is not deleted.`)) return;
+  const busy = v.status === "processing" || v.status === "queued";
+  const msg = busy ? `Cancel "${v.name}" and remove it?\n\n${v.status === "processing" ? "Its download or processing is stopped." : "It has not started yet."}`
+    : `Delete "${v.name}" from the library?\n\nIts breakdown and its copy of the video are removed. A file you imported by path is not deleted.`;
+  if (!confirm(msg)) return;
   try { await api(`/api/vods/${v.id}`, { method: "DELETE" }); } catch (e) { return toast(e.message, true); }
-  if (current?.id === v.id) location.hash = "#/";
+  if (current?.id === v.id) { current = null; location.hash = "#/"; }
+  finished.delete(v.id);
+  toast(busy ? `Cancelled "${v.name}"` : `Deleted "${v.name}"`);
   refresh();
 }
 

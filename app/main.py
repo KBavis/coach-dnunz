@@ -195,12 +195,11 @@ def reprocess(vod_id: str):
 @app.delete("/api/vods/{vod_id}")
 def delete(vod_id: str):
     con = db.connect()
-    vod = _row(con, vod_id)
-    if vod["status"] == "processing":
-        raise HTTPException(409, "wait for processing to finish first")
+    _row(con, vod_id)
     with con:
-        con.execute("DELETE FROM vods WHERE id=?", (vod_id,))
+        con.execute("DELETE FROM vods WHERE id=?", (vod_id,))   # first, so a running job sees it is gone
     con.close()
+    jobs.cancel(vod_id)                     # stops a download or analysis that is still running
     shutil.rmtree(db.VODS / vod_id, ignore_errors=True)   # symlinked sources are unlinked, not deleted
     return {"ok": True}
 

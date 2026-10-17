@@ -25,6 +25,7 @@ ANALYSES = int(os.environ.get("COACH_PARALLEL", 2))
 _downloads: "queue.Queue[str]" = queue.Queue()
 _analyses: "queue.PriorityQueue[tuple]" = queue.PriorityQueue()   # (added at, id): oldest first
 _pending: set = set()             # ids waiting in or running through either pool
+_procs: dict = {}                 # id -> the yt-dlp or pipeline process running for it
 _lock = threading.Lock()
 _started = False
 
@@ -78,6 +79,7 @@ def _download(vod_id, url):
               "--concurrent-fragments", "4",
               "--merge-output-format", "mp4", "-o", str(work / "source.%(ext)s"), url],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, **text)
+    _procs[vod_id] = proc
     tail, streams, last = [], 0, -1.0
     for line in proc.stdout:
         tail = (tail + [line.strip()])[-4:]
@@ -93,6 +95,7 @@ def _download(vod_id, url):
                 _update(vod_id, stage="Downloading from YouTube" if streams <= 1 else "Downloading audio",
                         pct=round(pct, 1))
     proc.wait()
+    _procs.pop(vod_id, None)
     if proc.returncode != 0 or video_path(vod_id) is None:
         return "download failed: " + " | ".join(x for x in tail if x)
     return None
@@ -155,6 +158,7 @@ def _analyse(vod_id):
     proc = subprocess.Popen(
         [sys.executable, "-m", "pipeline.run", str(video), str(work)],
         cwd=ROOT, env=env, stdout=log, stderr=log, stdin=subprocess.DEVNULL)
+    _procs[vod_id] = proc
     min_mb, oom, tick = _min_free_mb(), False, 0
     while proc.poll() is None:
         # memory guard: a runaway job gets killed (with its workers) before it can freeze the machine
@@ -175,6 +179,9 @@ def _analyse(vod_id):
         tick += 1
         time.sleep(0.5)
     log.close()
+    _procs.pop(vod_id, None)
+    if _exists(vod_id) is None:                     # cancelled: deleted while it ran
+        return
     seg = work / "segments.json"
     if proc.returncode == 0 and seg.exists():
         _update(vod_id, status="ready", stage="Done", pct=100,
@@ -195,6 +202,19 @@ def _added_at(vod_id):
 def _done(vod_id):
     with _lock:
         _pending.discard(vod_id)
+
+
+def cancel(vod_id, wait=15):
+    """Stop whatever is running for a VOD (download or analysis) and wait until its worker has
+    let go of the folder, so it can be deleted. Call after removing its database row: a VOD that
+    is only waiting in a queue is then skipped by the worker that picks it up."""
+    proc = _procs.get(vod_id)
+    if proc is None:
+        return
+    _kill_tree(proc.pid)
+    deadline = time.time() + wait
+    while vod_id in _procs and time.time() < deadline:   # the worker pops it once its log is closed
+        time.sleep(0.1)
 
 
 def _worker(q, step):
