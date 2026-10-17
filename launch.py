@@ -8,7 +8,7 @@ import os, platform, shutil, socket, subprocess, sys, threading, time, urllib.re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-HOST, PREFERRED_PORT = "127.0.0.1", 8000
+HOST, PREFERRED_PORT = "127.0.0.1", int(os.environ.get("COACH_PORT", 8000))
 
 
 def say(msg):
@@ -29,7 +29,7 @@ def free_port():
         with socket.socket() as s:
             if s.connect_ex((HOST, port)) != 0:
                 return port
-    raise SystemExit("No free port found between 8000 and 8049")
+    raise SystemExit(f"No free port found between {PREFERRED_PORT} and {PREFERRED_PORT + 49}")
 
 
 def open_browser(url):
