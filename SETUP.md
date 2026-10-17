@@ -27,7 +27,12 @@ Make sure you extract it. Opening the zip and double-clicking files inside it wo
 ## 3. Start it
 
 1. Open the extracted **coach-dnunz-main** folder.
-2. Double-click **start.bat**.
+2. Double-click the file named **start** whose type is **Windows Batch File**.
+
+   There are three files called "start". Windows usually hides the end of file names, so look at
+   the **Type** column (switch to **View → Details** if you don't see it) and pick the one that
+   says **Windows Batch File**, not "Windows PowerShell Script" or "SH File". If your Windows does
+   show file endings, it's the one called **start.bat**.
 3. If a blue box says **"Windows protected your PC"**, click **More info**, then **Run anyway**.
    This happens because the file was downloaded from the internet.
 
@@ -61,14 +66,15 @@ Click a video in the library to open it.
 
 ## Next time
 
-Double-click **start.bat** again. It starts in a few seconds, and your library is still there.
+Double-click the same **start** file (type **Windows Batch File**) again. It starts in a few
+seconds, and your library is still there.
 
 ## Getting a newer version
 
 1. Download and extract the new ZIP (steps 1 and 2) into a new folder.
 2. To keep your library, copy the **data** folder from your old coach-dnunz-main folder into the
    new one.
-3. Start the new one with its **start.bat**.
+3. Start the new one with its **start** file (type **Windows Batch File**).
 
 ## If something goes wrong
 
@@ -76,7 +82,7 @@ Double-click **start.bat** again. It starts in a few seconds, and your library i
   window shows the exact address).
 - **The black window says the OCR engine could not load.** Install the Microsoft Visual C++
   Redistributable from **https://aka.ms/vs/17/release/vc_redist.x64.exe**, then double-click
-  **start.bat** again.
+  the **start** file (type **Windows Batch File**) again.
 - **The black window flashed and closed, or shows an error.** Check your internet connection and
   try again. If it keeps happening, take a screenshot of the black window and send it over.
 - **A YouTube link failed.** Check that the video is public and the link opens in your browser,
