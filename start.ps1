@@ -19,5 +19,5 @@ if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
 }
 
 Write-Host "[coach] Getting everything ready (the first run downloads Python and libraries, a few minutes)..."
-uv run --extra engine python launch.py
+uv run --extra engine python launch.py @args
 exit $LASTEXITCODE
