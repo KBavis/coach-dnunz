@@ -391,8 +391,7 @@ for (const b of document.querySelectorAll("#add-form .tabs button")) {
   b.addEventListener("click", () => { setTab(b.dataset.tab); if (b.dataset.tab === "links") $("#link-rows input")?.focus(); });
 }
 $("#add-btn").onclick = () => openAdd();
-$("#welcome-files").onclick = () => openAdd([], "files");
-$("#welcome-links").onclick = () => openAdd([], "links");
+$("#welcome-add").onclick = () => openAdd();
 
 function linkState(i) {
   const v = links[i].trim();

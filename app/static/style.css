@@ -123,13 +123,6 @@ mark { background: color-mix(in srgb, var(--accent) 30%, transparent); color: in
 
 #welcome { max-width: 620px; margin: 12vh auto 0; text-align: center; }
 #welcome p { margin: 0 0 26px; line-height: 1.55; }
-.choices { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.choice { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; text-align: left; padding: 18px 18px 16px; border-radius: 14px; background: var(--panel); border: 1px solid var(--line2); white-space: normal; }
-.choice:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--panel)); }
-.choice b { font-size: 16px; }
-.choice span { color: var(--muted); font-size: 13px; line-height: 1.4; }
-.choice em { position: absolute; top: 14px; right: 14px; }
-@media (max-width: 700px) { .choices { grid-template-columns: 1fr; } }
 
 /* ---------- add dialog ---------- */
 dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line2); border-radius: 16px; padding: 0; width: min(560px, calc(100vw - 32px)); box-shadow: var(--shadow); }
@@ -155,7 +148,7 @@ dialog::backdrop { background: rgba(4, 6, 10, .65); backdrop-filter: blur(3px); 
 .tabs button { border: 0; background: transparent; color: var(--muted); border-radius: 8px; padding: 7px 10px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
 .tabs button:hover { color: var(--text); background: transparent; }
 .tabs button.on { background: var(--panel3); color: var(--text); }
-.tabs em, .choice em { font-style: normal; font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--win); background: color-mix(in srgb, var(--win) 14%, transparent); border-radius: 99px; padding: 1px 7px; }
+.tabs em { font-style: normal; font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--win); background: color-mix(in srgb, var(--win) 14%, transparent); border-radius: 99px; padding: 1px 7px; }
 .tabs .count { min-width: 18px; font-size: 11px; padding: 0 6px; border-radius: 99px; background: var(--accent); color: var(--accent-ink); }
 .tabs .count:empty { display: none; }
 .pane { display: flex; flex-direction: column; gap: 8px; }
