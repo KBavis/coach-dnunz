@@ -51,8 +51,9 @@ minutes. Each one appears in your library when it's ready. You can keep using th
 
 Click a video in the library to open it.
 
-- **Right side:** the rounds of each game. Click one to jump to it. Each round shows the score,
-  whether it was won (**W**, green) or lost (**L**, red), and whether the spike was planted.
+- **Right side:** the games (each tab shows **W** or **L** for the game) and their rounds. Click a
+  round to jump to it. Each round shows the score, whether it was won (**W**, green) or lost
+  (**L**, red), and whether the spike was planted. A game the video cuts off shows no result.
 - **Under the video:** jump to the buy phase, live round, plant or round end of the round
   you're watching, or click the round clock to jump to a moment (it matches the in-game timer).
 - **Skip dead time** jumps over menus, lobbies and timeouts while the video plays.

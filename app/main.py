@@ -75,7 +75,8 @@ def _summary(vod_id):
         rounds = {(s["game"], s["round"]) for s in res["segments"] if s["game"] is not None}
         played = sum(s["end"] - s["start"] for s in res["segments"] if s["game"] is not None)
         _summaries[vod_id] = (mtime, dict(games=len(res["games"]), rounds=len(rounds),
-                                          timeouts=len(res.get("pauses", [])), game_time=round(played)))
+                                          timeouts=len(res.get("pauses", [])), game_time=round(played),
+                                          results=[g.get("result") for g in res["games"]]))
     return _summaries[vod_id][1]
 
 

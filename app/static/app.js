@@ -284,8 +284,12 @@ function renderGrid() {
 
 function card(v, q) {
   const s = v.summary;
+  const results = (s?.results || []).length && s.results.some(Boolean)
+    ? el("span", { class: "gres", title: "Result of each game for the team being watched" },
+      ...s.results.map((r) => el("i", { class: r === "win" ? "w" : r === "loss" ? "l" : "" }, r === "win" ? "W" : r === "loss" ? "L" : "–")))
+    : null;
   const meta = s && !s.games ? el("span", { class: "warn" }, `No Valorant games found · ${ago(v.created_at)}`)
-    : s ? [plural(s.games, "game"), plural(s.rounds, "round"), ago(v.created_at)].join(" · ") : ago(v.created_at);
+    : s ? el("span", {}, [plural(s.games, "game"), plural(s.rounds, "round"), ago(v.created_at)].join(" · "), results) : ago(v.created_at);
   const img = el("img", { src: `/api/vods/${v.id}/thumb.jpg`, alt: "", loading: "lazy" });
   img.onerror = () => img.remove();
   const title = el("div", { class: "title", title: v.name }, highlight(v.name, q));
@@ -589,11 +593,19 @@ const known = (sc) => sc && sc[0] != null && sc[1] != null;
 // which HUD side is the team being watched: detected per game from the WON / LOST banners
 const sideOf = (game) => games.find((g) => g.game === game)?.our_side || null;
 const oursFirst = (sc, game) => (sideOf(game) === "r" ? [sc[1], sc[0]] : sc);
+const gameOf = (game) => games.find((g) => g.game === game) || {};
 function resultOf(r) {
   const side = sideOf(r.game);
-  if (r.winner && side) return r.winner === side ? "w" : "l";     // the score change, when it was read
-  return r.banner === "win" ? "w" : r.banner === "loss" ? "l" : null;   // else that round's banner
+  if (!side) return null;                                          // our team not known: no W/L
+  if (r.winner) return r.winner === side ? "w" : "l";              // the score change, when it was read
+  // else that round's banner, which shows the view of the team the banners mostly followed
+  const seen = gameOf(r.game).banner_side;
+  if (!r.banner || !seen) return null;
+  const won = r.banner === "win" ? seen : seen === "l" ? "r" : "l";
+  return won === side ? "w" : "l";
 }
+// the game's outcome for the watched team: "w" / "l", or null when unknown (cut off, team unknown)
+const gameResult = (g) => (g.result === "win" ? "w" : g.result === "loss" ? "l" : null);
 
 async function openVod(id) {
   let d;
@@ -690,6 +702,14 @@ function buildRounds(result) {
 const scoreText = (sc, game) => (known(sc) ? oursFirst(sc, game).join("–") : "");   // ours first when known
 
 /* rounds panel */
+function gameChip(g) {
+  const res = gameResult(g);
+  const score = g.final ? scoreText(g.final, g.game) : "";
+  const title = g.status === "unfinished" ? "The video ends before this game did"
+    : res ? `${res === "w" ? "Won" : "Lost"} ${score} (your team first) · ${plural(g.rounds, "round")}`
+      : `${score ? `Final ${score} · ` : ""}result unknown (your team could not be told apart) · ${plural(g.rounds, "round")}`;
+  return el("span", { class: "gchip" + (res ? ` ${res}` : ""), title }, res ? res.toUpperCase() : "–");
+}
 function showGame(g) {
   shownGame = g;
   $("#game-tabs").replaceChildren(...games.map((x) => el("button", {
@@ -699,10 +719,15 @@ function showGame(g) {
       if (x.game !== activeRound?.game && first) seek(first.start);   // another game: start at its round 1
       showGame(x.game);
     },
-  }, games.length > 1 ? `Game ${x.game}` : "Rounds", el("span", { class: "final" }, `${x.rounds}`),
+  }, games.length > 1 ? `Game ${x.game}` : "Game", gameChip(x),
   activeRound?.game === x.game && x.game !== g ? el("span", { class: "live-dot", title: "Playing" }) : null)));
   const list = rounds.filter((r) => r.game === g);
-  $("#rounds").replaceChildren(...(games.length ? list.map(roundRow) : [el("p", { class: "empty-rounds muted" },
+  const gm = gameOf(g);
+  const res = gameResult(gm);
+  const outcome = gm.final && el("div", { class: "game-end" + (res ? ` ${res}` : "") },
+    el("b", {}, gm.status === "unfinished" ? "Unfinished" : res === "w" ? "Won" : res === "l" ? "Lost" : "Final"),
+    el("span", {}, gm.status === "unfinished" ? `video ends at ${scoreText(gm.final, g)}` : scoreText(gm.final, g)));
+  $("#rounds").replaceChildren(...(games.length ? [...list.map(roundRow), outcome].filter(Boolean) : [el("p", { class: "empty-rounds muted" },
     "No Valorant rounds were found in this video. It may not be a match recording, or its HUD layout is one the detector does not know yet.")]));
   markActive(true);
 }

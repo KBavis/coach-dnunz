@@ -18,8 +18,9 @@ Valorant's default HUD):
 
 - Add video files and YouTube links; up to 3 downloads and 2 analyses run at once, in the order
   added, with per-step progress.
-- Detects games, rounds and phases, timeouts, dead time and remade games; reads the score and
-  each round's WON / LOST banner, and works out which side of the HUD is the team being watched.
+- Detects games, rounds and phases, timeouts, dead time and remade games; reads the score,
+  each round's WON / LOST banner and the post-match screen, and works out which team is being
+  watched, so rounds and games show won / lost.
 - A searchable library and a round-centred viewer (round list with W/L, phase buttons, a round
   clock on the game's own timer, skip dead time).
 
@@ -80,8 +81,14 @@ process so a crash or memory spike cannot take the server down):
 4. **Results** (`pipeline/banner.py`): the WON / LOST / CLUTCH / FLAWLESS / ACE / THRIFTY banner
    at each round end is read by OCR, voting over the seconds around it. Per game, banners are
    matched against which score went up to find which HUD side is the watched team (a majority
-   vote, since spectator recordings sometimes show an enemy player). Each round's W/L then comes
-   from the score change, or from its banner where the score did not show it.
+   vote, since spectator recordings sometimes show an enemy player; a weak vote leaves the side
+   unknown and no W/L is shown). Each round's W/L then comes from the score change, or from its
+   banner where the score did not show it.
+5. **Game results** (`pipeline/banner.py`): the post-match VICTORY / DEFEAT screen is read after
+   each game; when its numbers match the final score it is the recording account's own result
+   and decides the team (it beats the banner vote). A game goes to whoever had more rounds at the
+   end, including one the host stopped early. A game the video cuts off before a winning score is
+   `unfinished` and has no result.
 
 Rebuilding the digit templates from an OCR-labelled VOD:
 `python -m pipeline.digits <hud.npz> <readings.jsonl>`.
@@ -105,7 +112,8 @@ Each VOD lives in `data/vods/<id>/`: `source.<ext>` (the video), `segments.json`
 breakdown), `readings.jsonl` (per-second HUD readings), `run.log`, `progress.json` and
 `thumb.jpg`. `data/` and `vods/` are git-ignored; never commit them.
 
-`segments.json`: `duration`, `games` (`game`, `start`, `end`, `rounds`, `our_side`),
+`segments.json`: `duration`, `games` (`game`, `start`, `end`, `rounds`, `our_side`, `final` as
+`[left, right]`, `status` = `finished` / `unfinished`, `result` = `win` / `loss`),
 `segments` (`game`, `round`, `phase` = `PRE_ROUND` / `ROUND` / `POST_PLANT` / `ROUND_END` /
 `NON_GAME`, `start`, `end`, `score` as `[left, right]`, `result` = `win` / `loss` / null),
 and `pauses` (`start`, `end`, `timer`).

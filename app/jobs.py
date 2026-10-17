@@ -269,9 +269,12 @@ def enqueue(vod_id):
         _analyses.put((_added_at(vod_id), vod_id))
 
 
+RESULTS_VERSION = 2   # pipeline.banner.RESULTS_VERSION (not imported: it pulls in OpenCV and OCR)
+
+
 def _add_results():
-    """VODs processed before round results were read get them now, one at a time in the
-    background (re-reading the WON / LOST banners around each round end, ~20 s per VOD)."""
+    """VODs whose round / game results are missing or older than RESULTS_VERSION get them now, one
+    at a time in the background (re-reading the banners and end screens, ~20-60 s per VOD)."""
     setup.READY.wait()
     con = db.connect()
     ids = [r["id"] for r in con.execute("SELECT id FROM vods WHERE status='ready' ORDER BY created_at DESC")]
@@ -283,7 +286,7 @@ def _add_results():
         except (FileNotFoundError, ValueError):
             continue
         ends = [x for x in res["segments"] if x["phase"] == "ROUND_END"]
-        if video is None or not ends or all("result" in x for x in ends):
+        if video is None or not ends or res.get("results_version", 1) >= RESULTS_VERSION:
             continue
         subprocess.run([sys.executable, "-m", "pipeline.banner", str(video), str(work_dir(vod_id))],
                        cwd=ROOT, env=_env(), capture_output=True, timeout=1800)
