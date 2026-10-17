@@ -5,7 +5,7 @@
 import json, re, shutil, subprocess
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, UploadFile
+from fastapi import FastAPI, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -128,7 +128,7 @@ def thumb(vod_id: str):
 
 
 @app.post("/api/vods")
-async def upload(file: UploadFile):
+async def upload(file: UploadFile, last_modified: float | None = Form(None)):
     ext = Path(file.filename or "").suffix.lower()
     if ext not in ALLOWED:
         raise HTTPException(400, f"unsupported file type {ext or '(none)'}; use {', '.join(sorted(ALLOWED))}")
@@ -143,6 +143,10 @@ async def upload(file: UploadFile):
         con.execute("INSERT INTO vods (id, name, filename, status, created_at) VALUES (?,?,?,?,?)",
                     (vod_id, Path(file.filename).stem, file.filename, "queued", db.now()))
     con.close()
+    # when it was recorded: the video's own metadata, else the file's date on the coach's computer
+    when = jobs.file_date(d / f"source{ext}", last_modified / 1000 if last_modified else None)
+    if when:
+        jobs._update(vod_id, recorded_at=when[0], recorded_kind=when[1])
     jobs.enqueue(vod_id)
     return {"id": vod_id}
 

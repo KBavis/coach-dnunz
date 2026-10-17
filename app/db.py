@@ -17,7 +17,9 @@ CREATE TABLE IF NOT EXISTS vods (
     error TEXT DEFAULT '',
     duration REAL DEFAULT 0,
     created_at REAL NOT NULL,
-    source_url TEXT DEFAULT ''
+    source_url TEXT DEFAULT '',
+    recorded_at REAL,              -- when the match was played: stream start, upload, or file date
+    recorded_kind TEXT             -- streamed | published (YouTube) | recorded | saved (a file)
 )
 """
 
@@ -30,6 +32,9 @@ def connect():
     cols = {r[1] for r in con.execute("PRAGMA table_info(vods)")}
     if "source_url" not in cols:                                  # older libraries
         con.execute("ALTER TABLE vods ADD COLUMN source_url TEXT DEFAULT ''")
+    if "recorded_at" not in cols:
+        con.execute("ALTER TABLE vods ADD COLUMN recorded_at REAL")
+        con.execute("ALTER TABLE vods ADD COLUMN recorded_kind TEXT")
 
     return con
 

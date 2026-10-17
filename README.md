@@ -108,6 +108,10 @@ Rebuilding the digit templates from an OCR-labelled VOD:
 
 ### Data
 
+Each VOD's row in `data/library.db` also stores when the match was played (`recorded_at`,
+`recorded_kind`): the stream start or publish date from YouTube, or for a file the recording time
+in its metadata, else the file's date on the computer it came from.
+
 Each VOD lives in `data/vods/<id>/`: `source.<ext>` (the video), `segments.json` (the
 breakdown), `readings.jsonl` (per-second HUD readings), `run.log`, `progress.json` and
 `thumb.jpg`. `data/` and `vods/` are git-ignored; never commit them.

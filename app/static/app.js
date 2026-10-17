@@ -17,14 +17,12 @@ const fmt = (t) => {
   const ss = String(s).padStart(2, "0");
   return h ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
 };
-const ago = (ts) => {
-  const d = new Date(ts * 1000), days = Math.floor((Date.now() - d) / 864e5);
-  if (days < 1) return "today";
-  if (days < 2) return "yesterday";
-  if (days < 7) return `${days} days ago`;
-  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: d.getFullYear() === new Date().getFullYear() ? undefined : "numeric" });
-};
 const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+// when the match was played, as the library shows it: "Streamed Mar 3, 2026"
+const DATE_KIND = { streamed: "Streamed", published: "Published", recorded: "Recorded", saved: "Saved" };
+const fmtDate = (ts) => new Date(ts * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+const matchDate = (v) => (v.recorded_at ? `${DATE_KIND[v.recorded_kind] || "Recorded"} ${fmtDate(v.recorded_at)}` : `Added ${fmtDate(v.created_at)}`);
+const playedAt = (v) => v.recorded_at || v.created_at;
 const api = async (path, opts) => {
   const r = await fetch(path, opts);
   if (!r.ok) {
@@ -249,8 +247,9 @@ function renderJobs() {
 function sortVods(list) {
   const by = $("#sort").value;
   const cmp = {
-    new: (a, b) => b.created_at - a.created_at,
-    old: (a, b) => a.created_at - b.created_at,
+    new: (a, b) => playedAt(b) - playedAt(a),
+    old: (a, b) => playedAt(a) - playedAt(b),
+    added: (a, b) => b.created_at - a.created_at,
     name: (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }),
     long: (a, b) => b.duration - a.duration,
   }[by];
@@ -284,19 +283,23 @@ function renderGrid() {
 
 function card(v, q) {
   const s = v.summary;
-  const results = (s?.results || []).length && s.results.some(Boolean)
-    ? el("span", { class: "gres", title: "Result of each game for the team being watched" },
-      ...s.results.map((r) => el("i", { class: r === "win" ? "w" : r === "loss" ? "l" : "" }, r === "win" ? "W" : r === "loss" ? "L" : "–")))
-    : null;
-  const meta = s && !s.games ? el("span", { class: "warn" }, `No Valorant games found · ${ago(v.created_at)}`)
-    : s ? el("span", {}, [plural(s.games, "game"), plural(s.rounds, "round"), ago(v.created_at)].join(" · "), results) : ago(v.created_at);
+  // games as W / L chips with their count, then when the match was played
+  const res = s?.results || [];
+  const wins = res.filter((r) => r === "win").length, losses = res.filter((r) => r === "loss").length;
+  const stats = !s ? null : !s.games ? el("div", { class: "stats warn" }, "No Valorant games found")
+    : el("div", { class: "stats" },
+      res.some(Boolean) ? el("span", { class: "gres", title: `${wins} won · ${losses} lost${res.length > wins + losses ? ` · ${res.length - wins - losses} unknown` : ""}` },
+        ...res.map((r, i) => el("i", { class: r === "win" ? "w" : r === "loss" ? "l" : "", title: `Game ${i + 1}: ${r === "win" ? "won" : r === "loss" ? "lost" : "result unknown"}` },
+          r === "win" ? "W" : r === "loss" ? "L" : "–"))) : null,
+      el("span", {}, `${plural(s.games, "game")} · ${plural(s.rounds, "round")}`));
+  const meta = el("div", {}, stats, el("div", { class: "date", title: `Added to the library ${fmtDate(v.created_at)}` }, matchDate(v)));
   const img = el("img", { src: `/api/vods/${v.id}/thumb.jpg`, alt: "", loading: "lazy" });
   img.onerror = () => img.remove();
   const title = el("div", { class: "title", title: v.name }, highlight(v.name, q));
   const c = el("div", { class: "card", tabindex: "0", onclick: () => { location.hash = `#/vod/${v.id}`; },
     onkeydown: (e) => { if (e.key === "Enter" && e.target === e.currentTarget) location.hash = `#/vod/${v.id}`; } },
     el("div", { class: "thumb" }, "◆", img, el("span", { class: "dur" }, fmt(v.duration))),
-    el("div", { class: "body" }, title, el("div", { class: "meta" }, meta)),
+    el("div", { class: "body" }, title, meta),
     el("button", { class: "icon more", title: "More", onclick: (e) => {
       e.stopPropagation();
       openMenu(e.currentTarget, [
@@ -548,6 +551,7 @@ function upload(file) {
     };
     xhr.onerror = () => fail("the app stopped responding");
     const fd = new FormData(); fd.append("file", file);
+    if (file.lastModified) fd.append("last_modified", String(file.lastModified));   // when it was recorded
     xhr.send(fd);
   });
 }

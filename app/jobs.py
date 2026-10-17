@@ -4,7 +4,7 @@ memory-guarded subprocess.
 Two pools: up to DOWNLOADS YouTube downloads at once (network-bound), and up to ANALYSES
 analyses at once (CPU/GPU-bound; each also decodes on the GPU when there is one, see
 pipeline/extract_hud.py). A finished download joins the analysis queue, which runs VODs in the order they were added."""
-import json, os, queue, re, subprocess, sys, threading, time
+import calendar, json, os, queue, re, shutil, subprocess, sys, threading, time
 
 import psutil
 
@@ -62,15 +62,20 @@ def _download(vod_id, url):
     text = dict(text=True, encoding="utf-8", errors="replace", env=_env())
     _update(vod_id, stage="Contacting YouTube", pct=0)
     try:
-        t = subprocess.run(yt + ["--print", "title", url], capture_output=True, timeout=120, **text)
+        t = subprocess.run(yt + ["--print", "title", "--print", YT_DATE_FIELDS, url],
+                           capture_output=True, timeout=120, **text)
     except subprocess.TimeoutExpired:
         return "YouTube did not respond in time"
     if t.returncode != 0:
         return "yt-dlp could not read that link: " + " | ".join(t.stderr.strip().splitlines()[-2:])
-    title = t.stdout.strip().splitlines()[0] if t.stdout.strip() else ""
+    lines = t.stdout.strip().splitlines()
+    title = lines[0] if lines else ""
     con = db.connect()
     with con:
         con.execute("UPDATE vods SET name=?, filename=? WHERE id=? AND name=?", (title or url, title or url, vod_id, url))
+        when = youtube_date(lines[1] if len(lines) > 1 else "")
+        if when:
+            con.execute("UPDATE vods SET recorded_at=?, recorded_kind=? WHERE id=?", (*when, vod_id))
     con.close()
     # "download:" in a progress template only selects the line type, yt-dlp does not print it,
     # so the lines carry their own PCT marker to match on, then bytes done / total / speed / eta
@@ -101,6 +106,41 @@ def _download(vod_id, url):
     if proc.returncode != 0 or video_path(vod_id) is None:
         return "download failed: " + " | ".join(x for x in tail if x)
     return None
+
+
+YT_DATE_FIELDS = "%(release_timestamp)s|%(timestamp)s|%(upload_date)s|%(live_status)s"
+
+
+def youtube_date(line):
+    """(timestamp, kind) from yt-dlp's YT_DATE_FIELDS line: when a stream started, or when a video
+    was published."""
+    parts = (line.split("|") + ["NA"] * 4)[:4]
+    release, stamp, day, live = parts
+    kind = "streamed" if live in ("was_live", "is_live", "post_live") else "published"
+    for x in (release, stamp):
+        try:
+            return float(x), kind
+        except ValueError:
+            pass
+    try:
+        return time.mktime(time.strptime(day, "%Y%m%d")), kind
+    except ValueError:
+        return None
+
+
+def file_date(path, fallback=None):
+    """(timestamp, kind) for a video file: the recording time in its metadata (OBS writes one),
+    else the date the file was saved on the coach's computer (sent by the browser)."""
+    setup.add_tool_paths()
+    try:
+        out = subprocess.run([shutil.which("ffprobe"), "-v", "error", "-show_entries", "format_tags=creation_time",
+                              "-of", "default=nw=1:nk=1", str(path)], capture_output=True, text=True, timeout=30).stdout.strip()
+        when = calendar.timegm(time.strptime(out[:19], "%Y-%m-%dT%H:%M:%S")) if out else None   # stored as UTC
+        if when and when > 1.3e9:                           # ignore placeholder dates (1970, 2000...)
+            return when, "recorded"
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        pass
+    return (fallback, "saved") if fallback else None
 
 
 def _download_details(rest):
@@ -272,6 +312,26 @@ def enqueue(vod_id):
 RESULTS_VERSION = 2   # pipeline.banner.RESULTS_VERSION (not imported: it pulls in OpenCV and OCR)
 
 
+def _add_dates():
+    """Dates for VODs added before they were stored: YouTube's (no re-download), or the file's."""
+    con = db.connect()
+    rows = [dict(r) for r in con.execute("SELECT id, source_url, created_at FROM vods WHERE recorded_at IS NULL")]
+    con.close()
+    for r in rows:
+        when = None
+        if r["source_url"]:
+            try:
+                t = subprocess.run([sys.executable, "-m", "yt_dlp", "--no-playlist", "--skip-download", "--print",
+                                    YT_DATE_FIELDS, r["source_url"]], capture_output=True, text=True, timeout=60, env=_env())
+                when = youtube_date(t.stdout.strip().splitlines()[0] if t.stdout.strip() else "")
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+        elif (video := video_path(r["id"])) is not None:
+            when = file_date(video)
+        if when:
+            _update(r["id"], recorded_at=when[0], recorded_kind=when[1])
+
+
 def _add_results():
     """VODs whose round / game results are missing or older than RESULTS_VERSION get them now, one
     at a time in the background (re-reading the banners and end screens, ~20-60 s per VOD)."""
@@ -303,6 +363,7 @@ def start():
     for _ in range(ANALYSES):
         threading.Thread(target=_worker, args=(_analyses, _analyse), daemon=True).start()
     threading.Thread(target=_add_results, daemon=True).start()
+    threading.Thread(target=_add_dates, daemon=True).start()
     con = db.connect()
     stuck = [r["id"] for r in con.execute("SELECT id FROM vods WHERE status IN ('queued','processing') ORDER BY created_at")]
     con.close()
