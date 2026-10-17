@@ -90,16 +90,21 @@ def main(video, out, fps=1, on_progress=None, gpu=True, duration=None):
                 arrs["timer"][r], arrs["left"][r], arrs["right"][r] = sub(a, TIMER), sub(a, LEFT), sub(a, RIGHT)
                 filled[r] = 1
                 n += 1
+                if n % 30 == 0:
+                    report(30)
             p.stdout.close()
             p.wait()
             if p.returncode not in (0, None) and n == 0 and decoder == "cuda":
                 chunks.put(c0)                  # the GPU choked on this chunk: leave it to the CPU
                 print("GPU decoder stopped, CPU continues", flush=True)
                 return
-            with lock:
-                done_s[0] += n / fps
-                if on_progress:
-                    on_progress(min(done_s[0], duration))
+            report(n % 30)
+
+    def report(frames):
+        with lock:
+            done_s[0] += frames / fps
+            if on_progress:
+                on_progress(min(done_s[0], duration))
 
     threads = [threading.Thread(target=decode, args=(d,), daemon=True) for d in decoders]
     for t in threads:

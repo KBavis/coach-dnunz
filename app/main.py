@@ -2,7 +2,7 @@
 
     uv run uvicorn app.main:app --port 8000     (then open http://localhost:8000)
 """
-import json, re, shutil
+import json, re, shutil, subprocess
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, UploadFile
@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import db, jobs
+from . import db, jobs, setup
 
 app = FastAPI(title="Coach dnunz")
 STATIC = Path(__file__).parent / "static"
@@ -31,12 +31,69 @@ def _row(con, vod_id):
     return dict(row)
 
 
+_summaries: dict = {}     # vod id -> (segments.json mtime, summary)
+
+
+def _result(vod_id):
+    """segments.json, upgraded in place if it predates per-segment scores and readings exist."""
+    seg = db.VODS / vod_id / "segments.json"
+    if not seg.exists():
+        return None
+    res = json.loads(seg.read_text())
+    readings = db.VODS / vod_id / "readings.jsonl"
+    if readings.exists() and any(s.get("game") is not None and "score" not in s for s in res["segments"]):
+        from pipeline import segment
+        new = segment.analyze(str(readings))
+        new["duration"] = max(new["duration"], res.get("duration", 0))
+        seg.write_text(json.dumps(new))
+        res = new
+    return res
+
+
+def _summary(vod_id):
+    """Games / rounds / timeouts for a library card, cached until segments.json changes."""
+    seg = db.VODS / vod_id / "segments.json"
+    try:
+        mtime = seg.stat().st_mtime
+    except FileNotFoundError:
+        return None
+    if vod_id not in _summaries or _summaries[vod_id][0] != mtime:
+        res = json.loads(seg.read_text())
+        rounds = {(s["game"], s["round"]) for s in res["segments"] if s["game"] is not None}
+        played = sum(s["end"] - s["start"] for s in res["segments"] if s["game"] is not None)
+        _summaries[vod_id] = (mtime, dict(games=len(res["games"]), rounds=len(rounds),
+                                          timeouts=len(res.get("pauses", [])), game_time=round(played)))
+    return _summaries[vod_id][1]
+
+
 @app.get("/api/vods")
 def list_vods():
     con = db.connect()
     rows = [dict(r) for r in con.execute("SELECT * FROM vods ORDER BY created_at DESC")]
     con.close()
+    for r in rows:
+        r["summary"] = _summary(r["id"]) if r["status"] == "ready" else None
     return rows
+
+
+@app.get("/api/vods/{vod_id}/thumb.jpg")
+def thumb(vod_id: str):
+    """A frame from the first live round (or a minute in), made once and cached."""
+    out = db.VODS / vod_id / "thumb.jpg"
+    if not out.exists():
+        video = jobs.video_path(vod_id)
+        if video is None:
+            raise HTTPException(404, "no video yet")
+        res = _result(vod_id)
+        live = [s["start"] for s in (res or {}).get("segments", []) if s["phase"] == "ROUND"]
+        at = live[0] + 20 if live else 60
+        setup.add_tool_paths()
+        subprocess.run([shutil.which("ffmpeg"), "-v", "error", "-y", "-ss", str(at), "-i", str(video),
+                        "-frames:v", "1", "-vf", "scale=480:-2", "-q:v", "4", str(out)],
+                       capture_output=True, timeout=60)
+        if not out.exists():
+            raise HTTPException(404, "could not make a thumbnail")
+    return FileResponse(out, headers={"Cache-Control": "max-age=86400"})
 
 
 @app.post("/api/vods")
@@ -84,8 +141,7 @@ def detail(vod_id: str):
     con = db.connect()
     vod = _row(con, vod_id)
     con.close()
-    seg = db.VODS / vod_id / "segments.json"
-    vod["result"] = json.loads(seg.read_text()) if seg.exists() else None
+    vod["result"] = _result(vod_id)
     return vod
 
 
@@ -112,7 +168,7 @@ def reprocess(vod_id: str):
     _row(con, vod_id)
     con.close()
     d = db.VODS / vod_id
-    for f in ("segments.json", "readings.jsonl", "progress.json", "hud.npz"):
+    for f in ("segments.json", "readings.jsonl", "progress.json", "hud.npz", "thumb.jpg"):
         (d / f).unlink(missing_ok=True)
     jobs.enqueue(vod_id)
     return {"ok": True}

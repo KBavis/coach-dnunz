@@ -1,13 +1,14 @@
 "use strict";
-const $ = (s) => document.querySelector(s);
+const $ = (s, root = document) => root.querySelector(s);
 const el = (tag, attrs = {}, ...kids) => {
   const n = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
+    if (v == null || v === false) continue;
     if (k === "class") n.className = v;
     else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
-    else n.setAttribute(k, v);
+    else n.setAttribute(k, v === true ? "" : v);
   }
-  n.append(...kids);
+  n.append(...kids.filter((k) => k != null));
   return n;
 };
 const fmt = (t) => {
@@ -16,11 +17,14 @@ const fmt = (t) => {
   const ss = String(s).padStart(2, "0");
   return h ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
 };
-const parseTime = (str) => {
-  const parts = String(str).trim().split(":").map(Number);
-  if (parts.some(Number.isNaN)) return NaN;
-  return parts.reduce((acc, p) => acc * 60 + p, 0);
+const ago = (ts) => {
+  const d = new Date(ts * 1000), days = Math.floor((Date.now() - d) / 864e5);
+  if (days < 1) return "today";
+  if (days < 2) return "yesterday";
+  if (days < 7) return `${days} days ago`;
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: d.getFullYear() === new Date().getFullYear() ? undefined : "numeric" });
 };
+const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
 const api = async (path, opts) => {
   const r = await fetch(path, opts);
   if (!r.ok) {
@@ -30,279 +34,494 @@ const api = async (path, opts) => {
   }
   return r.json();
 };
+const json = (method, body) => ({ method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+const YOUTUBE = /^https?:\/\/((www|m|music)\.)?(youtube\.com|youtu\.be)\//i;
+const VIDEO_EXT = /\.(mp4|mkv|mov|webm)$/i;
+
+let toastTimer;
+function toast(msg, bad = false) {
+  const t = $("#toast");
+  t.textContent = msg; t.className = bad ? "bad" : ""; t.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.hidden = true; }, 4000);
+}
+
+/* ---------- menus ---------- */
+function openMenu(anchor, items) {
+  const m = $("#menu");
+  m.replaceChildren(...items.map((it) => el("button", {
+    class: it.danger ? "danger" : "", onclick: (e) => { e.stopPropagation(); closeMenu(); it.fn(); },
+  }, it.label)));
+  m.hidden = false;
+  const r = anchor.getBoundingClientRect();
+  m.style.top = `${r.bottom + 4}px`;
+  m.style.left = `${Math.max(8, Math.min(r.right - m.offsetWidth, innerWidth - m.offsetWidth - 8))}px`;
+}
+const closeMenu = () => { $("#menu").hidden = true; };
+document.addEventListener("click", (e) => { if (!$("#menu").contains(e.target)) closeMenu(); });
+
+/* ---------- state ---------- */
+let vods = [];
+const uploads = new Map();   // key -> {name, pct, error}
+let view = "library";
 
 const PHASE = {
-  PRE_ROUND: { cls: "pre", name: "Pre-round" },
-  ROUND: { cls: "live", name: "Live round" },
+  PRE_ROUND: { cls: "pre", name: "Buy phase" },
+  ROUND: { cls: "live", name: "Live" },
   POST_PLANT: { cls: "post", name: "Post-plant" },
   ROUND_END: { cls: "end", name: "Round end" },
   NON_GAME: { cls: "dead", name: "Dead time" },
 };
 
-let vods = [];
-let current = null;      // detail of the selected VOD
-let segs = [];           // all segments sorted by start
-let pauses = [];
-let rounds = [];         // [{game, round, pre, live, post, end, liveStart, total}]
-let duration = 0;
+/* ---------- routing ---------- */
+function route() {
+  const legacy = location.hash.match(/^#vod=(\w+)/);
+  if (legacy) { location.replace(`#/vod/${legacy[1]}`); return; }
+  const m = location.hash.match(/^#\/vod\/(\w+)/);
+  if (m) openVod(m[1]);
+  else showLibrary();
+}
+window.addEventListener("hashchange", route);
+
+function showLibrary() {
+  view = "library";
+  $("#viewer-view").hidden = true;
+  $("#library-view").hidden = false;
+  const v = $("#video");
+  if (!v.paused) v.pause();
+  document.title = "Coach dnunz";
+  renderLibrary();
+}
 
 /* ---------- library ---------- */
-async function refreshLibrary() {
-  vods = await api("/api/vods");
+async function refresh() {
+  try { vods = await api("/api/vods"); } catch (_) { return; }
   renderLibrary();
-  if (current && ["queued", "processing"].includes(current.status)) await selectVod(current.id, true);
 }
 
 function renderLibrary() {
-  const ul = $("#library");
-  ul.replaceChildren(...vods.map((v) => {
-    const sub = v.status === "ready" ? fmt(v.duration)
-      : v.status === "failed" ? "failed" : `${v.stage || "waiting"} · ${Math.round(v.pct)}%`;
-    const name = el("span", { class: "li-name", title: v.name }, v.name);
-    const li = el("li", { class: v.id === current?.id ? "active" : "", onclick: () => selectVod(v.id) },
-      el("div", { class: "li-top" }, name,
-        el("span", { class: `badge ${v.status}` }, v.status),
-        el("button", { class: "li-btn", title: "Rename", onclick: (e) => { e.stopPropagation(); startRename(v.id, name); } }, "✎"),
-        el("button", { class: "li-btn", title: "Delete", onclick: (e) => { e.stopPropagation(); removeVod(v); } }, "✕")),
-      el("div", { class: "li-sub" }, sub));
-    if (v.status === "processing" || v.status === "queued")
-      li.append(el("div", { class: "bar" }, el("div", { style: `width:${v.pct}%` })));
-    return li;
+  renderActivity();
+  if (view !== "library") return;
+  renderJobs();
+  renderGrid();
+  const nothing = !vods.length && !uploads.size;
+  $("#welcome").hidden = !nothing;
+  $("#lib-wrap").hidden = nothing;
+}
+
+function renderActivity() {
+  const busy = vods.filter((v) => v.status === "processing" || v.status === "queued").length + uploads.size;
+  const a = $("#activity");
+  a.hidden = !busy;
+  a.textContent = `${busy} in progress`;
+}
+$("#activity").onclick = () => { location.hash = "#/"; };
+
+function jobStage(v) {
+  if (v.status === "failed") return v.error || "Processing failed";
+  const s = v.stage || "Waiting";
+  return s;
+}
+
+let jobsKey = "";
+function renderJobs() {
+  const list = [
+    ...[...uploads.entries()].map(([key, u]) => ({ key, upload: true, ...u })),
+    ...vods.filter((v) => ["processing", "queued", "failed"].includes(v.status)),
+  ];
+  const key = JSON.stringify(list.map((j) => [j.key || j.id, j.name, j.status, j.stage, Math.round(j.pct), j.error]));
+  if (key === jobsKey) return;
+  jobsKey = key;
+  $("#jobs-wrap").hidden = !list.length;
+  const active = list.filter((j) => j.status !== "failed").length;
+  $("#jobs-title").textContent = active ? "In progress" : "Needs attention";
+  $("#jobs-note").textContent = active > 1 ? "running side by side" : "";
+  $("#jobs").replaceChildren(...list.map((j) => {
+    if (j.upload) {
+      return el("div", { class: "job" + (j.error ? " failed" : "") },
+        el("span", { class: "j-name", title: j.name }, j.name),
+        el("span", { class: "j-pct" }, j.error ? "" : `${Math.round(j.pct)}%`),
+        el("span", { class: "j-stage" }, j.error || "Uploading"),
+        j.error ? null : el("div", { class: "bar" }, el("div", { style: `width:${j.pct}%` })));
+    }
+    const failed = j.status === "failed", waiting = j.status === "queued";
+    return el("div", { class: "job" + (failed ? " failed" : "") },
+      el("span", { class: "j-name", title: j.name }, j.name),
+      el("span", { class: "j-pct" }, failed || waiting ? "" : `${Math.round(j.pct)}%`),
+      el("span", { class: "j-stage", title: failed ? j.error : "" }, jobStage(j)),
+      failed ? el("div", { class: "j-actions" },
+        el("button", { onclick: () => reprocess(j) }, "Retry"),
+        el("button", { class: "danger", onclick: () => removeVod(j) }, "Remove"))
+        : el("div", { class: "bar" + (waiting ? " wait" : "") }, el("div", { style: `width:${j.pct}%` })));
   }));
 }
 
-function startRename(id, target) {
-  const vod = vods.find((v) => v.id === id) || current;
-  const input = el("input", { class: "rename", value: vod.name });
+function sortVods(list) {
+  const by = $("#sort").value;
+  const cmp = {
+    new: (a, b) => b.created_at - a.created_at,
+    old: (a, b) => a.created_at - b.created_at,
+    name: (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }),
+    long: (a, b) => b.duration - a.duration,
+  }[by];
+  return [...list].sort(cmp);
+}
+
+function highlight(text, q) {
+  if (!q) return text;
+  const i = text.toLowerCase().indexOf(q);
+  if (i < 0) return text;
+  const span = el("span");
+  span.append(text.slice(0, i), el("mark", {}, text.slice(i, i + q.length)), text.slice(i + q.length));
+  return span;
+}
+
+let gridKey = "";
+function renderGrid() {
+  const q = $("#search").value.trim().toLowerCase();
+  const ready = vods.filter((v) => v.status === "ready");
+  const shown = sortVods(ready.filter((v) => !q || v.name.toLowerCase().includes(q)));
+  $("#lib-count").textContent = ready.length ? (q ? `${shown.length} of ${ready.length}` : `${ready.length}`) : "";
+  $("#no-match").hidden = !(q && ready.length && !shown.length);
+  const key = JSON.stringify([q, $("#sort").value, shown.map((v) => [v.id, v.name, v.duration, v.summary])]);
+  if (key === gridKey) return;
+  gridKey = key;
+  $("#grid").replaceChildren(...shown.map((v) => card(v, q)));
+}
+
+function card(v, q) {
+  const s = v.summary;
+  const meta = s && !s.games ? el("span", { class: "warn" }, `No Valorant games found · ${ago(v.created_at)}`)
+    : s ? [plural(s.games, "game"), plural(s.rounds, "round"), ago(v.created_at)].join(" · ") : ago(v.created_at);
+  const img = el("img", { src: `/api/vods/${v.id}/thumb.jpg`, alt: "", loading: "lazy" });
+  img.onerror = () => img.remove();
+  const title = el("div", { class: "title", title: v.name }, highlight(v.name, q));
+  const c = el("div", { class: "card", tabindex: "0", onclick: () => { location.hash = `#/vod/${v.id}`; },
+    onkeydown: (e) => { if (e.key === "Enter") location.hash = `#/vod/${v.id}`; } },
+    el("div", { class: "thumb" }, "◆", img, el("span", { class: "dur" }, fmt(v.duration))),
+    el("div", { class: "body" }, title, el("div", { class: "meta" }, meta)),
+    el("button", { class: "icon more", title: "More", onclick: (e) => {
+      e.stopPropagation();
+      openMenu(e.currentTarget, [
+        { label: "Rename", fn: () => startRename(v, title) },
+        { label: "Re-run detection", fn: () => reprocess(v, true) },
+        { label: "Delete", danger: true, fn: () => removeVod(v) },
+      ]);
+    } }, "⋯"));
+  return c;
+}
+
+$("#search").addEventListener("input", () => {
+  if (view !== "library") location.hash = "#/";
+  renderGrid();
+});
+$("#sort").addEventListener("change", renderGrid);
+
+function startRename(v, target) {
+  const input = el("input", { class: "rename", value: v.name });
   target.replaceWith(input);
   input.focus(); input.select();
   let done = false;
   const finish = async (save) => {
     if (done) return; done = true;
     const name = input.value.trim();
-    if (save && name && name !== vod.name) {
-      try { await api(`/api/vods/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }); }
-      catch (e) { alert(e.message); }
+    if (save && name && name !== v.name) {
+      try { await api(`/api/vods/${v.id}`, json("PATCH", { name })); v.name = name; }
+      catch (e) { toast(e.message, true); }
     }
-    await refreshLibrary();
-    if (current?.id === id) { current.name = name || current.name; $("#v-name").textContent = current.name; $("#p-name").textContent = current.name; }
+    input.replaceWith(target);
+    target.textContent = v.name;
+    if (current?.id === v.id) { current.name = v.name; document.title = `${v.name} · Coach dnunz`; }
+    gridKey = ""; refresh();
   };
   input.addEventListener("keydown", (e) => { if (e.key === "Enter") finish(true); if (e.key === "Escape") finish(false); });
   input.addEventListener("blur", () => finish(true));
   input.addEventListener("click", (e) => e.stopPropagation());
 }
 
-async function removeVod(v) {
-  if (!confirm(`Delete "${v.name}" from the library?\n\nThe processed results are removed; a file you imported by path is not deleted.`)) return;
-  try { await api(`/api/vods/${v.id}`, { method: "DELETE" }); } catch (e) { return alert(e.message); }
-  if (current?.id === v.id) { current = null; history.replaceState(null, "", "#"); show("empty"); }
-  refreshLibrary();
+async function reprocess(v, confirmFirst = false) {
+  if (confirmFirst && !confirm(`Re-run detection on "${v.name}"? The current breakdown is replaced when it finishes.`)) return;
+  try { await api(`/api/vods/${v.id}/reprocess`, { method: "POST" }); } catch (e) { return toast(e.message, true); }
+  if (view === "viewer") location.hash = "#/";
+  refresh();
 }
 
-/* ---------- upload ---------- */
+async function removeVod(v) {
+  if (!confirm(`Delete "${v.name}" from the library?\n\nIts breakdown is removed. A file you imported by path is not deleted.`)) return;
+  try { await api(`/api/vods/${v.id}`, { method: "DELETE" }); } catch (e) { return toast(e.message, true); }
+  if (current?.id === v.id) location.hash = "#/";
+  refresh();
+}
+
+/* ---------- adding VODs ---------- */
+let picked = [];
+const dlg = $("#add-dialog");
+function openAdd(files = []) {
+  picked = [...files];
+  $("#links").value = "";
+  renderPicked();
+  if (!dlg.open) dlg.showModal();
+}
+$("#add-btn").onclick = () => openAdd();
+$("#welcome-add").onclick = () => openAdd();
+
+function parseLinks() {
+  const lines = $("#links").value.split(/\s+/).map((s) => s.trim()).filter(Boolean);
+  return { good: [...new Set(lines.filter((l) => YOUTUBE.test(l)))], bad: lines.filter((l) => !YOUTUBE.test(l)) };
+}
+function renderPicked() {
+  $("#picked").replaceChildren(...picked.map((f, i) => el("li", {},
+    el("span", { class: "n", title: f.name }, f.name),
+    el("span", { class: "muted small" }, `${(f.size / 1e9).toFixed(f.size > 1e9 ? 1 : 2)} GB`),
+    el("button", { type: "button", class: "icon", title: "Remove", onclick: () => { picked.splice(i, 1); renderPicked(); } }, "✕"))));
+  const { good, bad } = parseLinks();
+  const note = $("#links-note");
+  note.textContent = bad.length ? `Not a YouTube link: ${bad[0]}${bad.length > 1 ? ` (+${bad.length - 1} more)` : ""}` : good.length ? plural(good.length, "link") : "";
+  note.classList.toggle("bad", !!bad.length);
+  const n = picked.length + good.length;
+  const go = $("#add-go");
+  go.disabled = !n || bad.length > 0;
+  go.textContent = n ? `Add ${plural(n, "VOD")}` : "Add";
+}
+$("#links").addEventListener("input", renderPicked);
+$("#file").addEventListener("change", (e) => { addPicked(e.target.files); e.target.value = ""; });
+function addPicked(files) {
+  const ok = [...files].filter((f) => VIDEO_EXT.test(f.name));
+  if (ok.length < files.length) toast("Only .mp4, .mkv, .mov and .webm files can be added", true);
+  picked.push(...ok);
+  renderPicked();
+}
+const drop = $("#drop");
+["dragenter", "dragover"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); e.stopPropagation(); drop.classList.add("over"); }));
+["dragleave", "drop"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove("over"); }));
+drop.addEventListener("drop", (e) => { e.stopPropagation(); addPicked(e.dataTransfer.files); });
+
+$("#add-form").addEventListener("submit", (e) => {
+  if (e.submitter?.value !== "default") return;
+  const { good } = parseLinks();
+  const files = picked;
+  picked = [];
+  location.hash = "#/";
+  ingest(files, good);
+});
+
+async function ingest(files, links) {
+  for (const url of links) {
+    try { await api("/api/vods/from-url", json("POST", { url })); }
+    catch (err) { toast(`${url}: ${err.message}`, true); }
+  }
+  if (links.length) refresh();
+  // uploads to the local server run two at a time; each starts processing as soon as it lands
+  const queue = [...files];
+  const next = async () => { while (queue.length) await upload(queue.shift()); };
+  await Promise.all([next(), next()]);
+  refresh();
+}
+
 function upload(file) {
+  const key = `${file.name}:${file.size}:${Math.random()}`;
+  uploads.set(key, { name: file.name, pct: 0 });
+  renderLibrary();
   return new Promise((resolve) => {
-    const box = $("#upload-status");
-    box.hidden = false;
     const xhr = new XMLHttpRequest();
     xhr.open("POST", "/api/vods");
-    xhr.upload.onprogress = (e) => { if (e.lengthComputable) box.textContent = `Uploading ${file.name} — ${Math.round((e.loaded / e.total) * 100)}%`; };
-    xhr.onload = () => {
-      box.hidden = true;
-      if (xhr.status >= 200 && xhr.status < 300) resolve(JSON.parse(xhr.responseText).id);
-      else { let m = xhr.statusText; try { m = JSON.parse(xhr.responseText).detail; } catch (_) {} alert(`${file.name}: ${m}`); resolve(null); }
+    xhr.upload.onprogress = (e) => {
+      if (!e.lengthComputable) return;
+      uploads.get(key).pct = (e.loaded / e.total) * 100;
+      renderLibrary();
     };
-    xhr.onerror = () => { box.hidden = true; alert(`Upload of ${file.name} failed`); resolve(null); };
+    const fail = (msg) => {
+      uploads.get(key).error = `Upload failed: ${msg}`;
+      renderLibrary();
+      setTimeout(() => { uploads.delete(key); renderLibrary(); }, 8000);
+      resolve();
+    };
+    xhr.onload = async () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        await refresh();                 // show the server's queued entry before dropping ours
+        uploads.delete(key); renderLibrary(); resolve();
+      } else {
+        let m = xhr.statusText; try { m = JSON.parse(xhr.responseText).detail; } catch (_) {}
+        fail(m);
+      }
+    };
+    xhr.onerror = () => fail("the app stopped responding");
     const fd = new FormData(); fd.append("file", file);
     xhr.send(fd);
   });
 }
-async function uploadAll(files) {
-  let last = null;
-  for (const f of files) last = (await upload(f)) || last;
-  await refreshLibrary();
-  if (last) selectVod(last);
-}
-$("#url-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
-  const btn = $("#url-add"), input = $("#url");
-  btn.disabled = true;
-  try {
-    const r = await api("/api/vods/from-url", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: input.value }) });
-    input.value = "";
-    await refreshLibrary();
-    selectVod(r.id);
-  } catch (err) { alert(err.message); }
-  btn.disabled = false;
-});
-const drop = $("#drop");
-["dragenter", "dragover"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add("over"); }));
-["dragleave", "drop"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove("over"); }));
-drop.addEventListener("drop", (e) => uploadAll([...e.dataTransfer.files]));
-$("#file").addEventListener("change", (e) => { uploadAll([...e.target.files]); e.target.value = ""; });
-// dropping anywhere on the page should not navigate away to the raw file
+
+// dropping files anywhere adds them straight away (or into the dialog when it is open)
+let dragDepth = 0;
+const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes("Files");
+window.addEventListener("dragenter", (e) => { if (!hasFiles(e)) return; e.preventDefault(); dragDepth++; if (!dlg.open) $("#drop-overlay").hidden = false; });
+window.addEventListener("dragleave", (e) => { if (!hasFiles(e)) return; if (--dragDepth <= 0) { dragDepth = 0; $("#drop-overlay").hidden = true; } });
 window.addEventListener("dragover", (e) => e.preventDefault());
-window.addEventListener("drop", (e) => { e.preventDefault(); if (e.dataTransfer.files.length && !drop.contains(e.target)) uploadAll([...e.dataTransfer.files]); });
-
-/* ---------- selecting a VOD ---------- */
-function show(which) {
-  for (const id of ["empty", "processing", "viewer"]) $("#" + id).hidden = id !== which;
-}
-
-async function selectVod(id, polling = false) {
-  let d;
-  try { d = await api(`/api/vods/${id}`); } catch (e) { return; }
-  const wasReady = current?.id === id && current.status === "ready";
-  current = d;
-  history.replaceState(null, "", `#vod=${id}`);
-  renderLibrary();
-  if (d.status === "ready" && d.result) {
-    if (!wasReady) openViewer(d);
-  } else {
-    show("processing");
-    $("#p-name").textContent = d.name;
-    $("#p-stage").textContent = d.status === "failed" ? "Processing failed" : `${d.stage || "Waiting"} — ${Math.round(d.pct)}%`;
-    $("#p-bar").style.width = `${d.pct}%`;
-    $("#p-error").hidden = d.status !== "failed";
-    $("#p-error").textContent = d.error;
-    $("#p-retry").hidden = d.status !== "failed";
-    $("#p-retry").onclick = async () => { await api(`/api/vods/${id}/reprocess`, { method: "POST" }); refreshLibrary(); selectVod(id); };
-  }
-}
+window.addEventListener("drop", (e) => {
+  e.preventDefault();
+  dragDepth = 0; $("#drop-overlay").hidden = true;
+  if (!e.dataTransfer.files.length) return;
+  if (dlg.open) return addPicked(e.dataTransfer.files);
+  const ok = [...e.dataTransfer.files].filter((f) => VIDEO_EXT.test(f.name));
+  if (!ok.length) return toast("Only .mp4, .mkv, .mov and .webm files can be added", true);
+  location.hash = "#/";
+  ingest(ok, []);
+});
 
 /* ---------- viewer ---------- */
+let current = null;      // detail of the VOD being viewed
+let segs = [], pauses = [], rounds = [], games = [], duration = 0;
+let shownGame = null;
+
+async function openVod(id) {
+  let d;
+  try { d = await api(`/api/vods/${id}`); } catch (_) { toast("That VOD is no longer in the library", true); location.hash = "#/"; return; }
+  if (d.status !== "ready" || !d.result) {
+    toast(d.status === "failed" ? "Processing failed for this VOD. Retry it from the library." : "Still processing. It opens once it is ready.");
+    location.hash = "#/";
+    return;
+  }
+  view = "viewer";
+  $("#library-view").hidden = true;
+  $("#viewer-view").hidden = false;
+  closeMenu();
+  if (current?.id === d.id) return;
+  current = d;
+  document.title = `${d.name} · Coach dnunz`;
+  const res = d.result;
+  segs = [...res.segments].sort((a, b) => a.start - b.start);
+  pauses = res.pauses || [];
+  games = res.games;
+  duration = res.duration || d.duration;
+  rounds = buildRounds(res);
+  activeKey = null; activeRound = null; nowKey = ""; shownGame = null;
+  $("#v-name").textContent = d.name;
+  $("#v-meta").textContent = [fmt(duration), plural(games.length, "game"), plural(rounds.length, "round"), plural(pauses.length, "timeout")].join(" · ");
+  const v = $("#video");
+  v.src = `/api/vods/${d.id}/video`;
+  v.playbackRate = speed;
+  renderTimeline();
+  showGame(games[0]?.game ?? null);
+  update();
+}
+
 function buildRounds(result) {
   const map = new Map();
   for (const s of result.segments) {
     if (s.game == null) continue;
     const key = `${s.game}:${s.round}`;
-    if (!map.has(key)) map.set(key, { game: s.game, round: s.round });
+    if (!map.has(key)) map.set(key, { game: s.game, round: s.round, key });
     const r = map.get(key);
-    const slot = { PRE_ROUND: "pre", ROUND: "live", POST_PLANT: "post", ROUND_END: "end" }[s.phase];
-    r[slot] = s;
+    r[{ PRE_ROUND: "pre", ROUND: "live", POST_PLANT: "post", ROUND_END: "end" }[s.phase]] = s;
   }
   return [...map.values()].map((r) => {
     const first = r.pre || r.live || r.post || r.end;
     r.start = first.start;
     r.liveStart = (r.live || r.post || r.end).start;          // the round "starts" when it goes live
-    const last = r.end || r.post || r.live || r.pre;
-    r.finish = last.end;
-    r.playTime = Math.max(0, ((r.post || r.live || r.end).end) - r.liveStart);   // live + post-plant length
+    r.finish = (r.end || r.post || r.live || r.pre).end;
+    r.playTime = Math.max(0, (r.post || r.live || r.end).end - r.liveStart);   // live + post-plant
+    r.score = first.score;
+    r.timeouts = pauses.filter((p) => p.start < r.finish && p.end > r.start);
     return r;
   }).sort((a, b) => a.start - b.start);
 }
 
-function openViewer(d) {
-  const res = d.result;
-  segs = [...res.segments].sort((a, b) => a.start - b.start);
-  pauses = res.pauses || [];
-  duration = res.duration || d.duration;
-  rounds = buildRounds(res);
-  activeKey = null; activeRound = null; lastKey = ""; nowKey = "";
-  show("viewer");
-  $("#v-name").textContent = d.name;
-  const games = res.games.length;
-  $("#v-meta").textContent = `${fmt(duration)} · ${games} game${games === 1 ? "" : "s"} · ${rounds.length} rounds · ${pauses.length} pause${pauses.length === 1 ? "" : "s"}`;
-  const v = $("#video");
-  v.src = `/api/vods/${d.id}/video`;
-  v.playbackRate = Number($("#speed").value);
-  renderTimeline(res);
-  renderRounds(res);
-  // Go-to form
-  $("#g-game").replaceChildren(...res.games.map((g) => el("option", { value: g.game }, `Game ${g.game}`)));
-  $("#g-game").style.display = games > 1 ? "" : "none";
-  updateCaption();
-}
+const scoreText = (sc) => (sc && sc[0] != null && sc[1] != null ? `${sc[0]}–${sc[1]}` : "");
 
 function renderTimeline() {
   const tl = $("#timeline");
-  tl.replaceChildren();
-  for (const s of segs) {
-    tl.append(el("div", {
-      class: `seg ${PHASE[s.phase].cls}` + (s.phase === "ROUND" ? " round-start" : ""),
-      style: `left:${(s.start / duration) * 100}%;width:${Math.max(((s.end - s.start) / duration) * 100, 0.08)}%`,
-      onclick: () => seek(s.start),          // clicking a labelled section jumps to where it starts
-    }));
-  }
-  tl.append(el("div", { id: "round-band", style: "display:none" }), el("div", { id: "playhead" }));
-  $("#tl-games").replaceChildren(...current.result.games.map((g) => el("span", {
-    style: `left:${(g.start / duration) * 100}%;width:${((g.end - g.start) / duration) * 100}%`,
+  const pct = (t) => `${(t / duration) * 100}%`;
+  tl.replaceChildren(...segs.map((s) => el("div", {
+    class: `seg ${PHASE[s.phase].cls}` + (s.phase === "ROUND" ? " round-start" : ""),
+    style: `left:${pct(s.start)};width:${Math.max(((s.end - s.start) / duration) * 100, 0.08)}%`,
+  })), el("div", { id: "tl-pauses" }, ...pauses.map((p) => el("i", { style: `left:${pct(p.start)};width:${pct(p.end - p.start)}` }))),
+  el("div", { id: "round-band", style: "display:none" }), el("div", { id: "playhead" }));
+  $("#tl-games").replaceChildren(...games.map((g) => el("span", {
+    style: `left:${pct(g.start)};width:${pct(g.end - g.start)}`,
   }, `Game ${g.game} · ${g.rounds} rounds`)));
-  $("#pauses").replaceChildren(...pauses.map((p) => el("div", {
-    class: "p", title: `Timeout · ${fmt(p.end - p.start)} · timer stuck at ${p.timer} · ${fmt(p.start)}`,
-    style: `left:${(p.start / duration) * 100}%;width:${((p.end - p.start) / duration) * 100}%`,
-    onclick: () => seek(p.start),
-  })));
 }
 
-const labelFor = (s) => s.game == null ? "Dead time" : `Game ${s.game} · Round ${s.round} · ${PHASE[s.phase].name}`;
+// clicking the timeline jumps to the start of the section under the pointer
+const tlTime = (e) => { const r = $("#timeline").getBoundingClientRect(); return Math.min(Math.max((e.clientX - r.left) / r.width, 0), 1) * duration; };
+$("#timeline").addEventListener("click", (e) => { const t = tlTime(e); const s = segAt(t); seek(s ? s.start : t); });
+$("#timeline").addEventListener("mousemove", (e) => {
+  const t = tlTime(e), s = segAt(t), p = pauseAt(t);
+  showTip(e, p && s?.game != null ? `${describe(t)} · timeout` : describe(t), s ? `click: jump to the start of this section (${fmt(s.start)})` : fmt(t));
+});
+$("#timeline").addEventListener("mouseleave", hideTip);
 
-const TICK_OFFSETS = [30, 60, 90, 120, 150];
-
-function renderRounds(res) {
-  const box = $("#rounds");
-  box.replaceChildren();
-  for (const g of res.games) {
-    const rs = rounds.filter((r) => r.game === g.game);
-    box.append(el("div", { class: "game-h", "data-game": g.game }, `Game ${g.game} · ${fmt(g.start)}–${fmt(g.end)} · ${rs.length} rounds`));
-    for (const r of rs) box.append(roundCard(r));
-  }
+/* rounds panel */
+function showGame(g) {
+  shownGame = g;
+  $("#game-tabs").replaceChildren(...games.map((x) => el("button", {
+    class: x.game === g ? "on" : "", role: "tab", onclick: () => showGame(x.game),
+  }, games.length > 1 ? `Game ${x.game}` : "Rounds", el("span", { class: "muted" }, ` · ${x.rounds}`),
+  activeRound?.game === x.game && x.game !== g ? el("span", { class: "live-dot", title: "Playing" }) : null)));
+  const list = rounds.filter((r) => r.game === g);
+  $("#rounds").replaceChildren(...(games.length ? list.map(roundRow) : [el("p", { class: "empty-rounds muted" },
+    "No Valorant rounds were found in this video. It may not be a match recording, or its HUD layout is one the detector does not know yet.")]));
+  if (activeRound?.game === g) markActive(true);
 }
 
-function roundCard(r) {
+const BAR_SCALE = 180;   // seconds that fill a round's bar; a typical round is ~2:20
+function roundRow(r) {
   const span = Math.max(r.finish - r.start, 1);
   const pct = (t) => ((t - r.start) / span) * 100;
-  const card = el("div", { class: "round", "data-key": `${r.game}:${r.round}` });
-  card.append(el("div", { class: "r-top" }, el("b", {}, `Round ${r.round}`),
-    el("span", { title: "Length of the live round, including the post-plant" }, `${fmt(r.playTime)} live`)));
+  const bar = el("div", { class: "rbar", style: `width:${Math.min(100, Math.max(30, (span / BAR_SCALE) * 100))}%`,
+    title: "Click to jump to that moment" });
+  for (const s of [r.pre, r.live, r.post, r.end].filter(Boolean)) {
+    bar.append(el("div", { class: `seg ${PHASE[s.phase].cls}`, style: `left:${pct(s.start)}%;width:${((s.end - s.start) / span) * 100}%` }));
+  }
+  for (const p of r.timeouts) {
+    const a = Math.max(p.start, r.start), b = Math.min(p.end, r.finish);
+    bar.append(el("div", { class: "to", style: `left:${pct(a)}%;width:${((b - a) / span) * 100}%` }));
+  }
+  const mph = el("div", { class: "mph" });
+  bar.append(mph);
+  const timeAt = (e) => { const b = bar.getBoundingClientRect(); return r.start + Math.min(Math.max((e.clientX - b.left) / b.width, 0), 1) * span; };
+  bar.addEventListener("click", (e) => { e.stopPropagation(); seek(timeAt(e)); });
+  bar.addEventListener("mousemove", (e) => { const t = timeAt(e); showTip(e, describe(t, r), fmt(t)); });
+  bar.addEventListener("mouseleave", hideTip);
 
-  // labelled sections: click one to jump to where it starts; it fills as the video plays through it
-  const sections = el("div", { class: "sections" });
+  const flags = [r.post ? el("i", { class: "f-plant" }) : null, r.timeouts.length ? el("i", { class: "f-to" }) : null];
+  const row = el("div", { class: "rrow", title: `Round ${r.round}: click to jump to the buy phase`, onclick: () => seek(r.start) },
+    el("span", { class: "no" }, `R${r.round}`),
+    el("span", { class: "sc", title: "Score when the round started" }, scoreText(r.score)),
+    el("div", {}, bar),
+    el("span", { class: "len", title: "Live round length, including the post-plant" }, fmt(r.playTime)),
+    el("span", { class: "flags", title: [r.post ? "spike planted" : "", r.timeouts.length ? "timeout" : ""].filter(Boolean).join(", ") }, ...flags));
+
+  const chips = [];
   r.secs = [];
-  const defs = [[r.pre, "pre", "Pre-round", 92], [r.live, "live", "Live round", 94], [r.post, "post", "Post-plant", 96], [r.end, "end", "Round end", 90]];
-  for (const [seg, cls, name, minw] of defs) {
-    if (!seg) continue;
-    const dur = seg.end - seg.start;
-    const fill = el("i", { class: "fill" });
-    const btn = el("button", {
-      class: `sec ${cls}${seg.start >= 3600 ? " long" : ""}`, title: `Jump to the start of ${name.toLowerCase()} (${fmt(seg.start)})`,
-      style: `flex:${Math.max(dur, cls === "end" ? 6 : 14)} 1 0;min-width:${minw}px`, onclick: () => seek(seg.start),
-    }, el("span", { class: "n" }, name), el("span", { class: "d" }, cls === "end" ? fmt(seg.start) : `${fmt(dur)} · ${fmt(seg.start)}`), fill);
-    sections.append(btn);
-    r.secs.push({ seg, el: btn, fill });
+  for (const [s, cls, name] of [[r.pre, "pre", "Buy"], [r.live, "live", "Live"], [r.post, "post", "Planted"], [r.end, "end", "End"]]) {
+    if (!s) continue;
+    const c = el("button", { class: `pchip ${cls}`, title: `Jump to ${name.toLowerCase()} at ${fmt(s.start)}`, onclick: () => seek(s.start) },
+      el("b", {}, name), el("span", {}, fmt(s.end - s.start)));
+    chips.push(c);
+    r.secs.push({ seg: s, el: c });
   }
-  card.append(sections);
+  for (const p of r.timeouts) {
+    chips.push(el("button", { class: "pchip to", title: `Timer stuck at ${p.timer}. Jump to the timeout at ${fmt(p.start)}`, onclick: () => seek(p.start) },
+      el("b", {}, "Timeout"), el("span", {}, fmt(p.end - p.start))));
+  }
+  const offs = [30, 60, 90].filter((o) => r.liveStart + o < r.finish - 3);
+  const detail = el("div", { class: "rdetail" }, el("div", { class: "chips" }, ...chips),
+    offs.length ? el("div", { class: "jump" }, "Into the live round:", ...offs.map((o) => el("button", { onclick: () => seek(r.liveStart + o) }, `+${fmt(o)}`))) : null);
+  r.mph = mph; r.pct = pct;
+  return el("div", { class: "round", "data-key": r.key }, row, detail);
+}
 
-  const tos = pauses.filter((p) => p.start < r.finish && p.end > r.start);
-  if (tos.length) {
-    card.append(el("div", { class: "timeouts" }, ...tos.map((p) => el("button", {
-      class: "timeout", title: `Timer stuck at ${p.timer}. Jump to the start of the timeout.`, onclick: () => seek(p.start),
-    }, `Timeout ${fmt(p.end - p.start)} · ${fmt(p.start)}`))));
+function markActive(scroll) {
+  document.querySelectorAll(".round.now").forEach((n) => n.classList.remove("now"));
+  if (!activeRound) return;
+  const node = document.querySelector(`.round[data-key="${activeRound.key}"]`);
+  if (!node) return;
+  node.classList.add("now");
+  if (scroll && $("#follow").checked) {
+    const panel = $("#rounds");
+    const top = node.offsetTop - panel.offsetTop;
+    if (top < panel.scrollTop + 20 || top > panel.scrollTop + panel.clientHeight - 120) panel.scrollTo({ top: top - panel.clientHeight * 0.25, behavior: "smooth" });
   }
-
-  // fine scrubber: click anywhere inside the round, with ticks every 30 s of live round
-  const mini = el("div", { class: "mini" });
-  for (const seg of [r.pre, r.live, r.post, r.end].filter(Boolean)) {
-    mini.append(el("div", { class: `seg ${PHASE[seg.phase].cls}`, style: `left:${pct(seg.start)}%;width:${((seg.end - seg.start) / span) * 100}%` }));
-  }
-  const offs = TICK_OFFSETS.filter((o) => r.liveStart + o < r.finish - 3);
-  for (const o of offs) mini.append(el("div", { class: "tickline", style: `left:${pct(r.liveStart + o)}%` }));
-  mini.append(el("div", { class: "ghost" }), el("div", { class: "mph" }));
-  const timeAt = (e) => { const b = mini.getBoundingClientRect(); return r.start + Math.min(Math.max((e.clientX - b.left) / b.width, 0), 1) * span; };
-  mini.addEventListener("click", (e) => seek(timeAt(e)));
-  mini.addEventListener("mousemove", (e) => {
-    const t = timeAt(e);
-    mini.querySelector(".ghost").style.left = `${pct(t)}%`;
-    showTip(e, describe(t, r), `video ${fmt(t)}`);
-  });
-  mini.addEventListener("mouseleave", hideTip);
-  card.append(mini);
-  const ticks = el("div", { class: "ticks" });
-  for (const o of offs) ticks.append(el("span", { class: "tick", style: `left:${pct(r.liveStart + o)}%`, title: `${fmt(o)} into the live round`, onclick: () => seek(r.liveStart + o) }, `+${fmt(o)}`));
-  card.append(ticks);
-  r.mph = mini.querySelector(".mph");
-  r.pct = pct;
-  return card;
 }
 
 /* what is happening at video time t, phrased for a coach */
@@ -311,21 +530,19 @@ function describe(t, r) {
   if (!s || s.game == null) return "Dead time";
   r = r || roundOf(s);
   const base = `Game ${s.game} · Round ${s.round}`;
-  if (s.phase === "PRE_ROUND") return `${base} · Pre-round — live round starts in ${fmt(Math.max(0, r.liveStart - t))}`;
+  if (s.phase === "PRE_ROUND") return `${base} · Buy phase, live in ${fmt(Math.max(0, r.liveStart - t))}`;
   if (s.phase === "ROUND_END") return `${base} · Round end`;
-  return `${base} · ${PHASE[s.phase].name} — ${fmt(t - r.liveStart)} into the round`;
+  return `${base} · ${PHASE[s.phase].name}, ${fmt(t - r.liveStart)} in`;
 }
 
-/* floating tooltip */
 function showTip(e, text, sub) {
   const tip = $("#tip");
   tip.hidden = false;
   tip.replaceChildren(text, el("small", {}, sub || ""));
-  const w = tip.offsetWidth;
-  tip.style.left = `${Math.min(e.clientX + 14, window.innerWidth - w - 8)}px`;
+  tip.style.left = `${Math.min(e.clientX + 14, innerWidth - tip.offsetWidth - 8)}px`;
   tip.style.top = `${e.clientY + 16}px`;
 }
-const hideTip = () => { $("#tip").hidden = true; };
+function hideTip() { $("#tip").hidden = true; }
 
 function seek(t) {
   const v = $("#video");
@@ -342,88 +559,56 @@ function segAt(t) {
   return ans >= 0 && t < segs[ans].end + 1 ? segs[ans] : null;
 }
 const pauseAt = (t) => pauses.find((p) => t >= p.start && t <= p.end + 1 && p.end - p.start >= 5);
-const roundOf = (s) => s && s.game != null ? rounds.find((r) => r.game === s.game && r.round === s.round) : null;
+const roundOf = (s) => (s && s.game != null ? rounds.find((r) => r.game === s.game && r.round === s.round) : null);
 
-let lastKey = "";
-let activeKey = null, activeRound = null;
-function updateCaption() {
-  const v = $("#video");
-  const t = v.currentTime || 0;
-  $("#playhead") && ($("#playhead").style.left = `${(t / duration) * 100}%`);
-  const s = segAt(t);
-  const cap = $("#caption");
-  if (!s) { cap.hidden = true; return; }
-  cap.hidden = false;
-  const info = PHASE[s.phase];
-  cap.className = info.cls;
-  const p = pauseAt(t);
-  if (p && s.game != null) cap.className = "paused";
-  let head, body;
-  if (s.game == null) { head = "DEAD TIME"; body = "Menus / lobby"; }
-  else {
-    const r = roundOf(s);
-    head = `GAME ${s.game} · ROUND ${s.round}`;
-    body = `${info.name} — ${fmt(t - s.start)} in`;
-    if (r && (s.phase === "ROUND" || s.phase === "POST_PLANT")) body += ` · ${fmt(t - r.liveStart)} into the round`;
-    if (p) body = `Timeout — ${fmt(t - p.start)} in (timer stuck at ${p.timer})`;
-  }
-  const key = head + body;
-  if (key !== lastKey) { cap.replaceChildren(el("b", {}, head), body); lastKey = key; }
-  updateNowBar(s, t, p);
-  const rk = s.game != null ? `${s.game}:${s.round}` : null;
+let activeKey = null, activeRound = null, nowKey = "";
+function update() {
+  if (view !== "viewer" || !current) return;
+  const t = $("#video").currentTime || 0;
+  const ph = $("#playhead");
+  if (ph) ph.style.left = `${(t / duration) * 100}%`;
+  const s = segAt(t), p = pauseAt(t);
+  updateNow(s, t, p);
+
+  const rk = s?.game != null ? `${s.game}:${s.round}` : null;
   if (rk !== activeKey) {
-    document.querySelectorAll(".round.now").forEach((n) => n.classList.remove("now"));
-    if (activeRound?.mph) activeRound.mph.style.display = "none";
-    for (const sec of activeRound?.secs || []) { sec.el.classList.remove("active"); sec.fill.style.width = "0"; }
+    if (activeRound) for (const sec of activeRound.secs || []) sec.el.classList.remove("active");
     activeKey = rk;
     activeRound = rk ? roundOf(s) : null;
-    document.querySelectorAll(".game-h.now").forEach((n) => n.classList.remove("now"));
-    if (activeRound) document.querySelector(`.game-h[data-game="${activeRound.game}"]`)?.classList.add("now");
+    if (activeRound && activeRound.game !== shownGame && $("#follow").checked) showGame(activeRound.game);
+    else { markActive(true); if (games.length > 1) showGame(shownGame); }
     const band = $("#round-band");
-    if (band) {
-      band.style.display = activeRound ? "block" : "none";
-      if (activeRound) { band.style.left = `${(activeRound.start / duration) * 100}%`; band.style.width = `${Math.max(((activeRound.finish - activeRound.start) / duration) * 100, 0.3)}%`; }
-    }
-    const card = rk && document.querySelector(`.round[data-key="${rk}"]`);
-    if (card) {
-      card.classList.add("now");
-      if ($("#follow").checked) {
-        const panel = $("#rounds");
-        panel.scrollTo({ top: card.offsetTop - panel.offsetTop - panel.clientHeight * 0.25 });
-      }
+    band.style.display = activeRound ? "block" : "none";
+    if (activeRound) {
+      band.style.left = `${(activeRound.start / duration) * 100}%`;
+      band.style.width = `${Math.max(((activeRound.finish - activeRound.start) / duration) * 100, 0.3)}%`;
     }
   }
-  for (const sec of activeRound?.secs || []) {
-    const on = t >= sec.seg.start && t < sec.seg.end;
-    sec.el.classList.toggle("active", on);
-    sec.fill.style.width = on ? `${((t - sec.seg.start) / Math.max(sec.seg.end - sec.seg.start, 0.1)) * 100}%` : "0";
-  }
-  if (activeRound?.mph) {
-    activeRound.mph.style.display = "block";
-    activeRound.mph.style.left = `${activeRound.pct(Math.min(Math.max(t, activeRound.start), activeRound.finish))}%`;
+  if (activeRound) {
+    for (const sec of activeRound.secs || []) sec.el.classList.toggle("active", t >= sec.seg.start && t < sec.seg.end);
+    if (activeRound.mph) activeRound.mph.style.left = `${activeRound.pct(Math.min(Math.max(t, activeRound.start), activeRound.finish))}%`;
   }
 }
 
-let nowKey = "";
-function updateNowBar(s, t, p) {
-  const bar = $("#now");
-  let game = "GAME –", round = "ROUND –", phase, cls, time;
-  if (!s || s.game == null) { phase = "Dead time"; cls = "dead"; time = "menus / lobby"; }
+function updateNow(s, t, p) {
+  let cls, phase, where = "", score = "", time;
+  if (!s || s.game == null) { cls = "dead"; phase = "Dead time"; time = "menus, lobby or break"; }
   else {
     const r = roundOf(s);
-    game = `GAME ${s.game}`; round = `ROUND ${s.round}`;
     cls = PHASE[s.phase].cls; phase = PHASE[s.phase].name;
-    if (s.phase === "PRE_ROUND") time = `live round starts in ${fmt(Math.max(0, r.liveStart - t))}`;
-    else if (s.phase === "ROUND_END") time = "round has ended";
-    else time = `${fmt(t - r.liveStart)} into the live round`;
-    if (p) { cls = "paused"; phase = "Timeout"; time = `timer stuck at ${p.timer} · ${fmt(t - p.start)} into the timeout`; }
+    where = `${games.length > 1 ? `Game ${s.game} · ` : ""}Round ${s.round}`;
+    score = scoreText(r?.score);
+    if (s.phase === "PRE_ROUND") time = `live in ${fmt(Math.max(0, r.liveStart - t))}`;
+    else if (s.phase === "ROUND_END") time = "round over";
+    else time = `${fmt(t - r.liveStart)} into the round`;
+    if (p) { cls = "paused"; phase = "Timeout"; time = `${fmt(t - p.start)} in · timer stuck at ${p.timer}`; }
   }
-  const key = [game, round, phase, time].join("|");
+  const key = [cls, phase, where, score, time].join("|");
   if (key === nowKey) return;
   nowKey = key;
-  bar.className = cls;
-  $("#now-game").textContent = game; $("#now-round").textContent = round;
-  $("#now-phase").textContent = phase; $("#now-time").textContent = time;
+  $("#now").className = cls;
+  $("#now-phase").textContent = phase; $("#now-where").textContent = where;
+  $("#now-score").textContent = score; $("#now-time").textContent = time;
 }
 
 function autoSkip() {
@@ -446,62 +631,54 @@ function stepRound(dir) {
   let target;
   if (dir > 0) target = rounds.find((r) => r.start > t + 0.5);
   else {
-    // back: restart the current round if we're > 3s in, otherwise the previous one
-    const candidates = rounds.filter((r) => r.start < t - 3);
-    target = candidates[candidates.length - 1];
-    if (!target && here) target = here;
+    // back: restart the current round if more than 3 s in, otherwise the previous one
+    const before = rounds.filter((r) => r.start < t - 3);
+    target = before[before.length - 1] || here;
   }
   if (target) seek(target.start);
 }
 
+let speed = 1;
+$("#speed").addEventListener("click", (e) => {
+  const b = e.target.closest("button");
+  if (!b) return;
+  speed = Number(b.dataset.v);
+  $("#video").playbackRate = speed;
+});
+$("#video").addEventListener("ratechange", () => {
+  speed = $("#video").playbackRate;
+  for (const b of $("#speed").children) b.classList.toggle("on", Number(b.dataset.v) === speed);
+});
+$("#video").addEventListener("loadedmetadata", () => { $("#video").playbackRate = speed; });
 $("#prev").onclick = () => stepRound(-1);
 $("#next").onclick = () => stepRound(1);
-$("#speed").onchange = (e) => { $("#video").playbackRate = Number(e.target.value); };
-$("#video").addEventListener("ratechange", () => { $("#speed").value = String($("#video").playbackRate); });
-$("#video").addEventListener("timeupdate", () => { updateCaption(); autoSkip(); });
-$("#video").addEventListener("seeked", updateCaption);
-$("#video").addEventListener("loadedmetadata", () => { $("#video").playbackRate = Number($("#speed").value); });
-(function loop() { if (!$("#video").paused) { updateCaption(); autoSkip(); } requestAnimationFrame(loop); })();
+$("#video").addEventListener("timeupdate", () => { update(); autoSkip(); });
+$("#video").addEventListener("seeked", update);
+(function loop() { if (!$("#video").paused) { update(); autoSkip(); } requestAnimationFrame(loop); })();
 
-$("#timeline").addEventListener("mousemove", (e) => {
-  const r = $("#timeline").getBoundingClientRect();
-  const t = ((e.clientX - r.left) / r.width) * duration;
-  const seg = segAt(t);
-  showTip(e, describe(t), seg ? `click to jump to the start of this section · ${fmt(seg.start)}` : `video ${fmt(t)}`);
-});
-$("#timeline").addEventListener("mouseleave", hideTip);
-
-$("#goto").addEventListener("submit", (e) => {
-  e.preventDefault();
-  const game = Number($("#g-game").value) || 1;
-  const n = Number($("#g-round").value);
-  const off = parseTime($("#g-off").value);
-  const r = rounds.find((x) => x.game === game && x.round === n);
-  if (!r) return alert(`Game ${game} has no round ${n}`);
-  if (Number.isNaN(off)) return alert("Offset should look like 1:00");
-  const base = $("#g-into").value === "live" ? r.liveStart : (r.pre ? r.pre.start : r.start);
-  seek(base + off);
-});
-
-$("#v-name").addEventListener("click", () => startRename(current.id, $("#v-name")));
-$("#v-reprocess").addEventListener("click", async () => {
-  if (!confirm("Re-run detection from scratch on this VOD? It can take a long time.")) return;
-  await api(`/api/vods/${current.id}/reprocess`, { method: "POST" });
-  current.status = "queued";
-  await refreshLibrary();
-  selectVod(current.id);
+$("#v-name").addEventListener("click", () => startRename(current, $("#v-name")));
+$("#v-more").addEventListener("click", (e) => {
+  e.stopPropagation();
+  openMenu(e.currentTarget, [
+    { label: "Rename", fn: () => startRename(current, $("#v-name")) },
+    { label: "Re-run detection", fn: () => reprocess(current, true) },
+    { label: "Delete", danger: true, fn: () => removeVod(current) },
+  ]);
 });
 
 document.addEventListener("keydown", (e) => {
-  if (["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement?.tagName) || e.ctrlKey || e.metaKey || e.altKey) return;
+  const typing = ["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement?.tagName);
+  if (e.key === "Escape") { closeMenu(); if (typing) document.activeElement.blur(); return; }
+  if (typing || e.ctrlKey || e.metaKey || e.altKey || dlg.open) return;
+  if (e.key === "/") { e.preventDefault(); $("#search").focus(); return; }
+  if (view !== "viewer") return;
   if (e.key === "]") stepRound(1);
   else if (e.key === "[") stepRound(-1);
 });
 
 /* ---------- boot ---------- */
 (async function init() {
-  await refreshLibrary();
-  const m = location.hash.match(/vod=(\w+)/);
-  if (m && vods.some((v) => v.id === m[1])) selectVod(m[1]);
-  setInterval(() => refreshLibrary().catch(() => {}), 2500);
+  await refresh();
+  route();
+  setInterval(refresh, 2000);
 })();

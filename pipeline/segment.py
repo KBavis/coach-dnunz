@@ -1,7 +1,8 @@
 """Turn per-second HUD readings into game segments.
 
 Labels: NON_GAME, PRE_ROUND_n (buy phase), ROUND_n (live), POST_PLANT_n (spike icon
-shown), ROUND_END_n (short post-round countdown).
+shown), ROUND_END_n (short post-round countdown). Each game segment also carries `score`, the
+HUD's [left, right] score when it started.
 
 HUD behaviour this relies on (observed on the sample VOD):
   buy phase   timer counts 0:30 -> 0:00
@@ -114,17 +115,22 @@ def segment_run(run, game_no):
     rnd = first[0] + first[1] + 1
     segs, phase, start, seg_round = [], None, run[0]["t"], rnd
 
+    last_sc = first                                     # last confirmed (left, right) score
+    seg_score = first
+
     def switch(new, t):
-        nonlocal phase, start, seg_round
+        nonlocal phase, start, seg_round, seg_score
         if phase is not None and t > start:
-            segs.append(dict(game=game_no, phase=phase, round=seg_round, start=start, end=t))
-        phase, start, seg_round = new, t, rnd
+            segs.append(dict(game=game_no, phase=phase, round=seg_round, start=start, end=t, score=list(seg_score)))
+        phase, start, seg_round, seg_score = new, t, rnd, last_sc
 
     seen_sum = sum(first)   # last score sum seen on screen (scores only, never the timer)
     expected = 0            # round ends already detected via the timer whose score bump is still to come
     for i, r in enumerate(run):
         k, s, t = kind(r), r["s"], r["t"]
         sc = scores[i]
+        if sc[0] is not None and sc[1] is not None:
+            last_sc = sc
         bump = 0
         if sc[0] is not None and sc[1] is not None and sc[0] + sc[1] > seen_sum:
             bump, seen_sum = sc[0] + sc[1] - seen_sum, sc[0] + sc[1]

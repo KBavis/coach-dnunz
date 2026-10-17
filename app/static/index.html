@@ -3,111 +3,138 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>VOD Coach</title>
+<title>Coach dnunz</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<aside id="sidebar">
-  <h1>VOD Coach</h1>
-  <label id="drop" tabindex="0">
-    <strong>Drop a VOD here</strong>
-    <span>or click to choose a file (.mp4, .mkv, .mov, .webm)</span>
-    <input id="file" type="file" accept=".mp4,.mkv,.mov,.webm,video/*" multiple hidden>
-  </label>
-  <div class="or">or</div>
-  <form id="url-form">
-    <input id="url" type="url" placeholder="Paste a YouTube link" autocomplete="off" required>
-    <button id="url-add">Add</button>
-  </form>
-  <div id="upload-status" hidden></div>
-  <ul id="library"></ul>
-</aside>
+<header id="topbar">
+  <a id="brand" href="#/"><span class="logo">◆</span> Coach dnunz</a>
+  <div id="search-wrap">
+    <input id="search" type="search" placeholder="Search VODs" autocomplete="off" aria-label="Search VODs">
+    <kbd>/</kbd>
+  </div>
+  <button id="activity" class="chip" hidden></button>
+  <button id="add-btn" class="primary">+ Add VODs</button>
+</header>
 
 <main id="main">
-  <section id="empty">
-    <h2>Nothing selected</h2>
-    <p>There are two ways to add a VOD, both on the left:</p>
-    <ol>
-      <li><b>Drop the video file</b> (.mp4 / .mkv / .mov / .webm) onto the dashed box. Best quality, and works offline.</li>
-      <li><b>Paste a YouTube link</b> and press Add. The video is downloaded for you first.</li>
-    </ol>
-    <p>Processing takes a while for long recordings. You can keep browsing other VODs meanwhile, and everything is saved to the library.</p>
+  <!-- ---------- library ---------- -->
+  <section id="library-view">
+    <div id="jobs-wrap" hidden>
+      <div class="sec-head"><h3 id="jobs-title">In progress</h3><span id="jobs-note" class="muted small"></span></div>
+      <div id="jobs"></div>
+    </div>
+
+    <div id="lib-wrap">
+      <div class="sec-head">
+        <h3>Library</h3><span id="lib-count" class="muted"></span>
+        <div class="spacer"></div>
+        <label class="muted small">Sort
+          <select id="sort">
+            <option value="new">Newest</option><option value="old">Oldest</option>
+            <option value="name">Name</option><option value="long">Longest</option>
+          </select>
+        </label>
+      </div>
+      <div id="grid"></div>
+      <p id="no-match" class="muted" hidden>No VODs match your search.</p>
+    </div>
+
+    <div id="welcome" hidden>
+      <h1>Break down a Valorant VOD by round</h1>
+      <p class="muted">Add recordings or YouTube links. Each one is split into games, rounds, buy phases,
+        post-plants and timeouts, so you can jump straight to the moment you want to review.</p>
+      <button class="primary big" id="welcome-add">+ Add your first VODs</button>
+      <p class="muted small">You can add several at once. They download and process side by side.</p>
+    </div>
   </section>
 
-  <section id="processing" hidden>
-    <h2 id="p-name"></h2>
-    <p id="p-stage"></p>
-    <div class="bar"><div id="p-bar"></div></div>
-    <p id="p-error" class="error" hidden></p>
-    <button id="p-retry" hidden>Retry</button>
-  </section>
-
-  <section id="viewer" hidden>
-    <header id="v-head">
+  <!-- ---------- viewer ---------- -->
+  <section id="viewer-view" hidden>
+    <div id="v-head">
+      <a href="#/" class="back" title="Back to the library">‹ Library</a>
       <h2 id="v-name" title="Click to rename"></h2>
-      <span id="v-meta"></span>
-      <button id="v-reprocess" class="ghost">Re-process</button>
-    </header>
-
-    <div id="now" class="dead">
-      <span class="pill game" id="now-game">GAME –</span>
-      <span class="pill roundno" id="now-round">ROUND –</span>
-      <span class="pill phase" id="now-phase">–</span>
-      <span id="now-time"></span>
+      <span id="v-meta" class="muted"></span>
+      <div class="spacer"></div>
+      <button id="v-more" class="icon" title="More">⋯</button>
     </div>
 
     <div id="layout">
       <div id="left">
-        <div id="stage">
-          <video id="video" controls preload="metadata"></video>
-          <div id="caption" aria-live="polite"></div>
+        <div id="stage"><video id="video" controls preload="metadata"></video></div>
+
+        <div id="now" class="dead">
+          <span id="now-phase" class="phase-pill">–</span>
+          <b id="now-where"></b>
+          <span id="now-score" class="score"></span>
+          <span id="now-time" class="muted"></span>
         </div>
 
-        <div id="toolbar">
-          <button id="prev" title="Previous round ( [ )">&#9664; Round</button>
-          <button id="next" title="Next round ( ] )">Round &#9654;</button>
-          <label class="check"><input type="checkbox" id="skip" checked> Skip dead time</label>
-          <label>Speed
-            <select id="speed"><option>1</option><option>1.5</option><option>2</option><option>3</option></select>
+        <div id="controls">
+          <div class="group">
+            <button id="prev" title="Previous round  [">◀ Round</button>
+            <button id="next" title="Next round  ]">Round ▶</button>
+          </div>
+          <label class="switch" title="Jump over menus, lobby and timeouts while playing">
+            <input type="checkbox" id="skip" checked><span></span> Skip dead time
           </label>
-          <form id="goto">
-            <span>Go to</span>
-            <select id="g-game" title="Game"></select>
-            <label>round <input id="g-round" type="number" min="1" value="1"></label>
-            <label>+ <input id="g-off" value="1:00" size="5" title="mm:ss"></label>
-            <select id="g-into"><option value="live">into the live round</option><option value="pre">into pre-round</option></select>
-            <button>Go</button>
-          </form>
+          <div class="seg-ctl" id="speed" role="group" aria-label="Playback speed">
+            <button data-v="1" class="on">1×</button><button data-v="1.5">1.5×</button><button data-v="2">2×</button><button data-v="3">3×</button>
+          </div>
+          <div class="spacer"></div>
+          <span class="muted small keys"><kbd>[</kbd> <kbd>]</kbd> rounds</span>
         </div>
 
         <div id="timeline-wrap">
           <div id="tl-games"></div>
-          <div id="timeline"></div>
-          <div id="pauses"></div>
+          <div id="timeline"><div id="tl-pauses"></div></div>
           <div id="legend">
-            <span><i class="k pre"></i>Pre-round</span> <span><i class="k live"></i>Live round</span>
-            <span><i class="k post"></i>Post-plant</span> <span><i class="k end"></i>Round end</span>
-            <span><i class="k pause"></i>Timeout</span> <span><i class="k dead"></i>Dead time</span>
+            <span><i class="k pre"></i>Buy phase</span><span><i class="k live"></i>Live</span>
+            <span><i class="k post"></i>Post-plant</span><span><i class="k end"></i>Round end</span>
+            <span><i class="k pause"></i>Timeout</span>
           </div>
         </div>
-
-        <aside id="transcript-card">
-          <h3>Transcript</h3>
-          <p>Speech-to-text and speaker labels aren't wired in yet. This is where they'll appear, synced to the video.</p>
-        </aside>
       </div>
 
       <aside id="right">
         <div id="rounds-head">
-          <h3>Rounds</h3>
-          <label class="check"><input type="checkbox" id="follow" checked> Follow playback</label>
+          <div id="game-tabs" role="tablist"></div>
+          <label class="switch small" title="Keep the round being watched in view"><input type="checkbox" id="follow" checked><span></span> Follow</label>
         </div>
         <div id="rounds"></div>
       </aside>
     </div>
   </section>
 </main>
+
+<!-- ---------- add VODs ---------- -->
+<dialog id="add-dialog">
+  <form method="dialog" id="add-form">
+    <div class="dlg-head"><h2>Add VODs</h2><button value="cancel" class="icon" title="Close">✕</button></div>
+    <label id="drop" tabindex="0">
+      <input id="file" type="file" accept=".mp4,.mkv,.mov,.webm,video/*" multiple hidden>
+      <strong>Drop video files here</strong>
+      <span class="muted">or click to choose · .mp4 .mkv .mov .webm · several at once is fine</span>
+    </label>
+    <ul id="picked"></ul>
+    <label class="field">
+      <span>YouTube links <span class="muted">(one per line)</span></span>
+      <textarea id="links" rows="4" placeholder="https://www.youtube.com/watch?v=…&#10;https://youtu.be/…"></textarea>
+      <small id="links-note" class="muted"></small>
+    </label>
+    <div class="dlg-foot">
+      <span class="muted small">Videos process side by side. You can keep watching meanwhile.</span>
+      <div class="spacer"></div>
+      <button value="cancel">Cancel</button>
+      <button id="add-go" class="primary" value="default" disabled>Add</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="drop-overlay" hidden><div>Drop to add these videos</div></div>
+<div id="menu" class="menu" hidden></div>
 <div id="tip" hidden></div>
+<div id="toast" hidden></div>
 <script src="app.js"></script>
 </body>
 </html>
