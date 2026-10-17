@@ -1,106 +1,127 @@
 # Coach Dnunz
 
-A fun hobby project, built to help a friend who coaches Valorant.
+> **Setting it up to use it, not to work on it?** Follow **[SETUP.md](SETUP.md)**: plain-language
+> steps for Windows, no technical knowledge needed.
 
-His coaching sessions are long recordings, and the useful parts (a specific round, the moment
-after a spike plant, a timeout where the team talked strategy) are buried in them. This tool
-chops a VOD into rounds and phases so he can jump straight to the part he wants to review.
+A local-first Valorant VOD reviewer, built to help a friend who coaches. A match recording is
+split into games, rounds and the phases inside each round (buy phase, live, post-plant, round
+end), with timeouts, the score and each round's result, so a coach can jump straight to the
+moment they want to review. Everything runs on one machine: no cloud, no accounts.
 
-It is also a **learning project**. The goal is as much to understand how the pieces work as to
-ship something polished:
-
-- **OCR and reading a video**: pulling the round timer and scores out of the game's HUD, and
-  learning why generic OCR struggles on a game font and what to do about it (template matching,
-  cleaning up noisy readings, state machines over time).
-- **Transcription** *(next)*: speech-to-text with local, free models, and working out who is
-  speaking when (speaker diarization), including game audio bleeding into voice chat.
-- **Building it local-first**: no cloud, no accounts. Everything runs on one machine.
+It is also a learning project: reading a game's HUD out of video (template matching, OCR, and
+state machines over noisy readings), GPU-assisted decoding, and, next, local speech-to-text.
 
 ## Status
 
-Works today, on one sample stream:
+Works on the streams it has been tested on (player POV and custom-game spectator recordings with
+Valorant's default HUD):
 
-- Add several videos and YouTube links at once; they download and process side by side.
-- Detects games, rounds, and the phases inside each round: **Buy phase**, **Live**,
-  **Post-plant**, **Round end**, plus **Timeouts**, dead time between games, and the score.
-- A searchable library with thumbnails, and a viewer built around rounds: pick a game and round
-  on the right (with the score and which side took it), then jump between its buy phase, live
-  round, post-plant and round end under the video.
+- Add video files and YouTube links; up to 3 downloads and 2 analyses run at once, in the order
+  added, with per-step progress.
+- Detects games, rounds and phases, timeouts, dead time and remade games; reads the score and
+  each round's WON / LOST banner, and works out which side of the HUD is the team being watched.
+- A searchable library and a round-centred viewer (round list with W/L, phase buttons, a round
+  clock on the game's own timer, skip dead time).
 
-Not done yet:
+Speed on the dev machine (Ryzen 7 7800X3D + RTX 5080, WSL): a 1h45m VOD takes about 2.5 minutes
+end to end. A YouTube video also has to download first (about 7 GB for 3 hours at 1080p60).
 
-- **Transcription and speaker labels.** The panel in the viewer is a placeholder.
-- **Speed.** A 1h45m VOD takes about 2.5 minutes end to end on the dev machine (Ryzen 7800X3D +
-  NVIDIA GPU), down from about 30. Decoding the video is now most of it: the CPU and, when there
-  is one, an NVIDIA GPU decode chunks side by side. Digits are read by template matching, with a
-  fast recognition-only OCR fallback. Up to 3 YouTube downloads and 2 analyses run at once
-  (`COACH_DOWNLOADS`, `COACH_PARALLEL`; `COACH_GPU=0` turns the GPU off).
-- **Wider testing.** It has only been checked against one stream. It expects Valorant's default
-  observer/spectator HUD at the top centre, and other layouts or resolutions may misread.
+Not done yet: transcription and speaker labels, notes per round, and testing on broadcast
+overlays and non-1080p layouts (720p sources read noticeably worse).
 
-## Run
+## Running it
 
-No setup, nothing to install first.
+`start.bat` (Windows) and `start.sh` (WSL, Linux, macOS) install [uv](https://docs.astral.sh/uv/)
+if missing, then `uv run --extra engine python launch.py`, which installs Python 3.12 and the
+dependencies, fetches ffmpeg, picks a free port from 8000 and opens the browser. Both scripts
+pass their arguments on (`--no-browser`).
 
-**Windows**
+Developer equivalent:
 
-1. On this repository's GitHub page, click the green **Code** button, then **Download ZIP**.
-   (Or clone it, if you use git.)
-2. Unzip it somewhere you'll find it again, for example your Documents folder.
-3. Open the unzipped folder and double-click **`start.bat`**. If Windows shows "Windows protected
-   your PC", click **More info**, then **Run anyway**.
+    uv run --extra engine python launch.py --no-browser
+    uv run --extra engine uvicorn app.main:app --port 8000      # without the launcher
 
-**WSL, Linux or macOS:** get the code the same way (or `git clone`), then run `./start.sh` in a
-terminal inside the folder.
+The Windows script keeps its own environment in `.venv-windows`, so one checkout can be run from
+both Windows and WSL. Python is pinned to 3.12 (`.python-version`; `rapidocr-onnxruntime` has no
+3.13 build). The heavy dependencies (OCR, OpenCV, yt-dlp, deno) are the `engine` extra.
 
-The first start downloads what the app needs (uv, Python, libraries, ffmpeg), a few hundred MB,
-which takes a few minutes on a slow connection. Later starts take seconds. Your browser then
-opens the app. Keep the black window that opened alongside it running while you use the app,
-and close it to stop. If port 8000 is busy, the app picks the next free port.
+### Settings (environment variables)
 
-If Windows says the OCR engine could not load, install the
-[Microsoft Visual C++ Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe) and
-start it again.
-
-For developers: `uv run --extra engine python launch.py --no-browser` (`COACH_PORT` sets the port).
-
-**Using it:** click **Add VODs**, then add video files (fastest: processing starts right away) or
-YouTube links (each video downloads first). Click **Process VODs**. Each VOD shows its progress
-step by step, then joins the library. Open one to jump between games and rounds; press `/` to
-search, `[` and `]` to step through rounds, and `1`-`4` to jump to a round's phases.
-
-Recording tip for future sessions: in OBS you can record the mic, Discord, and game audio as
-separate tracks inside one file. That will make transcription and speaker separation far
-easier than one mixed track.
+| Variable | Default | Effect |
+|---|---|---|
+| `COACH_PORT` | 8000 | First port the launcher tries |
+| `COACH_DATA` | `./data` | Library location (database and per-VOD folders) |
+| `COACH_DOWNLOADS` | 3 | YouTube downloads at once |
+| `COACH_PARALLEL` | 2 | Analyses at once |
+| `COACH_GPU` | 1 | `0` disables NVIDIA GPU decoding |
+| `COACH_WORKERS` | set per job | OCR worker processes per analysis |
+| `MIN_MB` | min(4000, 10% of RAM) | Free-memory floor; a job below it is killed |
 
 ## How it works
 
-1. `ffmpeg` decodes the video and crops the small HUD strip at the top centre.
-2. The round timer and both scores are read about once a second, by matching the white digit
-   shapes against templates (`pipeline/digits.py`). OCR only runs on in-game frames the
-   templates could not read, and gaps the neighbouring seconds make obvious are filled in.
-3. A state machine turns those readings into segments. The timer counts down in the buy phase,
-   restarts at about 1:40 when the round goes live, gets replaced by a spike icon after a
-   plant, and a short countdown plus a score change marks the round end. A timer that stays
-   frozen for several seconds is a timeout.
-4. Noisy readings are cleaned up along the way, for example by requiring a score change to be
-   seen several times in a row before believing it.
-5. Round results come from the WON / LOST banner shown at each round end (`pipeline/banner.py`),
-   read from the same scan. Matching banners against which score went up tells which side of the
-   HUD is the team being watched, so wins and losses need no setup.
+Processing one VOD (`python -m pipeline.run <video> <workdir>`, run by the app as its own
+process so a crash or memory spike cannot take the server down):
 
-The detection code runs as a separate process, so a crash or a runaway memory spike can't take
-the web app down.
+1. **Scan** (`pipeline/extract_hud.py`): ffmpeg decodes the video at 1 fps, scaled to 1080p
+   coordinates, cropping the HUD strip (timer, both scores) and the round-result banner area.
+   The video is cut into 5-minute chunks pulled from a shared queue by a CPU decoder and, when
+   one works, an NVIDIA GPU decoder; the GPU is slower than a fast CPU alone but uses ~10x less
+   CPU, so together they finish sooner. Banner crops are kept only for frames with letter-sized
+   white blobs.
+2. **Read** (`pipeline/read_hud.py`, `pipeline/digits.py`): digits are read by matching white
+   glyph blobs against averaged templates (`pipeline/digits.npz`, about 0.3 ms per frame). Frames
+   near confident readings that still miss a field get recognition-only OCR on the digit box;
+   gaps the neighbouring seconds settle (a countdown, an unchanged score) are filled in.
+3. **Segment** (`pipeline/segment.py`): a state machine over the readings: the buy phase counts
+   down from ~0:30, the round goes live at ~1:40, a spike icon replaces the timer after a plant,
+   and a short countdown plus a score change ends the round. A timer frozen for 5+ s is a
+   timeout. Score changes need several readings in a row. A game of at most 4 rounds followed by
+   a fresh 0-0 game is a remake and becomes dead time.
+4. **Results** (`pipeline/banner.py`): the WON / LOST / CLUTCH / FLAWLESS / ACE / THRIFTY banner
+   at each round end is read by OCR, voting over the seconds around it. Per game, banners are
+   matched against which score went up to find which HUD side is the watched team (a majority
+   vote, since spectator recordings sometimes show an enemy player). Each round's W/L then comes
+   from the score change, or from its banner where the score did not show it.
+
+Rebuilding the digit templates from an OCR-labelled VOD:
+`python -m pipeline.digits <hud.npz> <readings.jsonl>`.
+
+### The web app
+
+- `launch.py`: port selection, first-run checks, opens the browser.
+- `app/main.py`: FastAPI. `GET/POST /api/vods`, `POST /api/vods/from-url`,
+  `GET/PATCH/DELETE /api/vods/{id}`, `POST /api/vods/{id}/reprocess`, `GET /api/vods/{id}/video`
+  (range requests), `GET /api/vods/{id}/thumb.jpg`, `GET /api/config`. Static files are served
+  with `Cache-Control: no-cache`.
+- `app/jobs.py`: a download pool (yt-dlp) and an analysis pool (oldest first), each job a
+  subprocess with a memory guard; deleting a VOD cancels its running job. VODs processed before
+  round results existed get them in the background at startup.
+- `app/db.py`: SQLite library (`data/library.db`).
+- `app/static/`: plain HTML/CSS/JS frontend, no build step.
+
+### Data
+
+Each VOD lives in `data/vods/<id>/`: `source.<ext>` (the video), `segments.json` (the
+breakdown), `readings.jsonl` (per-second HUD readings), `run.log`, `progress.json` and
+`thumb.jpg`. `data/` and `vods/` are git-ignored; never commit them.
+
+`segments.json`: `duration`, `games` (`game`, `start`, `end`, `rounds`, `our_side`),
+`segments` (`game`, `round`, `phase` = `PRE_ROUND` / `ROUND` / `POST_PLANT` / `ROUND_END` /
+`NON_GAME`, `start`, `end`, `score` as `[left, right]`, `result` = `win` / `loss` / null),
+and `pauses` (`start`, `end`, `timer`).
+
+To register an already-processed VOD without copying it:
+`python -m app.import_vod <video> <segments.json> "<name>"`.
 
 ## Layout
 
-- `pipeline/`: frame extraction, HUD reading (OCR), and the segmentation state machine
-  (`python -m pipeline.run <video> <workdir>`)
-- `app/`: FastAPI backend, SQLite library, and the static frontend
-- `data/` and `vods/`: your videos and results (git-ignored, never commit these)
+- `pipeline/`: scanning, HUD reading, segmentation, round results
+- `app/`: FastAPI backend, job pools, SQLite library, static frontend
+- `launch.py`, `start.sh`, `start.bat`, `start.ps1`: one-command start
+- `SETUP.md`: non-technical setup guide
 
-To add an already-processed VOD without copying it:
-`python -m app.import_vod <video> <segments.json> "<name>"`.
+Recording tip: in OBS you can record the mic, Discord and game audio as separate tracks in one
+file, which will make transcription and speaker separation far easier later.
 
 ## Credits
 
