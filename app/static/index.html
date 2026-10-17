@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Coach dnunz</title>
-<link rel="stylesheet" href="style.css?v=7">
+<link rel="stylesheet" href="style.css?v=8">
 </head>
 <body>
 <header id="topbar">
@@ -138,10 +138,22 @@
   </form>
 </dialog>
 
+<dialog id="confirm-dialog">
+  <form method="dialog" class="confirm-form">
+    <h2 id="confirm-title"></h2>
+    <p id="confirm-body" class="muted"></p>
+    <div class="dlg-foot">
+      <div class="spacer"></div>
+      <button id="confirm-cancel" value="cancel">Cancel</button>
+      <button id="confirm-ok" value="ok"></button>
+    </div>
+  </form>
+</dialog>
+
 <div id="drop-overlay" hidden><div>Drop to add these videos</div></div>
 <div id="menu" class="menu" hidden></div>
 <div id="tip" hidden></div>
 <div id="toast" hidden></div>
-<script src="app.js?v=7"></script>
+<script src="app.js?v=8"></script>
 </body>
 </html>

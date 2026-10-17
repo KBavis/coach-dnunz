@@ -299,8 +299,27 @@ function startRename(v, target) {
   for (const ev of ["click", "pointerdown", "dblclick"]) input.addEventListener(ev, (e) => e.stopPropagation());
 }
 
+/* in-app confirmation, styled like the rest of the app; resolves true when confirmed */
+function ask({ title, body, ok = "Confirm", cancel = "Cancel", danger = false }) {
+  const d = $("#confirm-dialog");
+  $("#confirm-title").textContent = title;
+  $("#confirm-body").textContent = body;
+  const go = $("#confirm-ok");
+  go.textContent = ok;
+  $("#confirm-cancel").textContent = cancel;
+  go.className = danger ? "danger-solid" : "primary";
+  return new Promise((resolve) => {
+    d.addEventListener("close", () => resolve(d.returnValue === "ok"), { once: true });
+    d.returnValue = "";
+    d.showModal();
+    go.focus();
+  });
+}
+$("#confirm-dialog").addEventListener("click", (e) => { if (e.target === e.currentTarget) e.currentTarget.close("cancel"); });   // backdrop
+
 async function reprocess(v, confirmFirst = false) {
-  if (confirmFirst && !confirm(`Re-run detection on "${v.name}"? The current breakdown is replaced when it finishes.`)) return;
+  if (confirmFirst && !await ask({ title: "Re-run detection?", ok: "Re-run",
+    body: `"${v.name}" is processed again from scratch. It can't be opened until that finishes.` })) return;
   try { await api(`/api/vods/${v.id}/reprocess`, { method: "POST" }); } catch (e) { return toast(e.message, true); }
   if (view === "viewer") location.hash = "#/";
   refresh();
@@ -308,9 +327,14 @@ async function reprocess(v, confirmFirst = false) {
 
 async function removeVod(v) {
   const busy = v.status === "processing" || v.status === "queued";
-  const msg = busy ? `Cancel "${v.name}" and remove it?\n\n${v.status === "processing" ? "Its download or processing is stopped." : "It has not started yet."}`
-    : `Delete "${v.name}" from the library?\n\nIts breakdown and its copy of the video are removed. A file you imported by path is not deleted.`;
-  if (!confirm(msg)) return;
+  const ok = await ask(busy ? {
+    title: "Cancel and remove?", ok: "Cancel and remove", cancel: "Keep it", danger: true,
+    body: `"${v.name}" is removed from the queue. ${v.status === "processing" ? "Its download or processing is stopped." : "It has not started yet."}`,
+  } : {
+    title: "Delete this VOD?", ok: "Delete", cancel: "Keep it", danger: true,
+    body: `"${v.name}" and its breakdown are removed from the library. A file you imported by path is not deleted.`,
+  });
+  if (!ok) return;
   try { await api(`/api/vods/${v.id}`, { method: "DELETE" }); } catch (e) { return toast(e.message, true); }
   if (current?.id === v.id) { current = null; location.hash = "#/"; }
   finished.delete(v.id);
@@ -864,7 +888,7 @@ $("#v-more").addEventListener("click", (e) => {
 document.addEventListener("keydown", (e) => {
   const typing = ["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement?.tagName);
   if (e.key === "Escape") { closeMenu(); if (typing) document.activeElement.blur(); return; }
-  if (typing || e.ctrlKey || e.metaKey || e.altKey || dlg.open) return;
+  if (typing || e.ctrlKey || e.metaKey || e.altKey || dlg.open || $("#confirm-dialog").open) return;
   if (e.key === "/") { e.preventDefault(); $("#search").focus(); return; }
   if (view !== "viewer") return;
   if (e.key === "]") stepRound(1);
