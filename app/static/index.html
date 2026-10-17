@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Coach Dnunz</title>
-<link rel="stylesheet" href="style.css?v=10">
+<link rel="stylesheet" href="style.css?v=11">
 </head>
 <body>
 <header id="topbar">
@@ -45,11 +45,18 @@
     </div>
 
     <div id="welcome" hidden>
-      <h1>Break down a Valorant VOD by round</h1>
-      <p class="muted">Add recordings or YouTube links. Each one is split into games, rounds, buy phases,
-        post-plants and timeouts, so you can jump straight to the moment you want to review.</p>
-      <button class="primary big" id="welcome-add">+ Add your first VODs</button>
-      <p class="muted small">You can add several at once. They download and process side by side.</p>
+      <h1>Add your first VODs</h1>
+      <p class="muted">Coach Dnunz splits each match recording into games and rounds, with the buy phase,
+        live round, plant and round end marked, so you can jump straight to the moment you want to review.</p>
+      <div class="choices">
+        <button class="choice" id="welcome-files">
+          <b>Add video files</b><span>Recordings on this computer (.mp4, .mkv, .mov, .webm)</span>
+          <em>Fastest</em>
+        </button>
+        <button class="choice" id="welcome-links">
+          <b>Add YouTube links</b><span>Each video is downloaded first, then processed</span>
+        </button>
+      </div>
     </div>
   </section>
 
@@ -109,33 +116,38 @@
 <!-- ---------- add VODs ---------- -->
 <dialog id="add-dialog">
   <form method="dialog" id="add-form">
-    <div class="dlg-head"><h2>Add VODs</h2><button value="cancel" class="icon" title="Close">✕</button></div>
-    <ol class="steps">
-      <li><b>Add</b> video files and YouTube links</li>
-      <li><b>They queue up</b> and process in the order added</li>
-      <li><b>Each opens</b> in your library when ready</li>
-    </ol>
-    <div class="field">
-      <span class="label">YouTube links</span>
-      <div id="link-rows"></div>
-      <button type="button" id="add-link" class="ghost-add">+ Add another link</button>
-      <small class="hint">YouTube videos download first: about 7 GB for a 3-hour stream at 1080p. If you already
-        have the recording, adding the file below skips the download and is faster.</small>
+    <div class="dlg-head">
+      <div><h2>Add VODs</h2><p class="muted small">Choose recordings to break down by round. They are processed in the order you add them.</p></div>
+      <button value="cancel" class="icon" title="Close">✕</button>
     </div>
-    <div class="field">
-      <span class="label">Video files <span class="muted small">· fastest, processing starts right away</span></span>
+
+    <div class="tabs" role="tablist">
+      <button type="button" role="tab" data-tab="files" class="on">Video files <em>Fastest</em><span class="count" id="count-files"></span></button>
+      <button type="button" role="tab" data-tab="links">YouTube links<span class="count" id="count-links"></span></button>
+    </div>
+
+    <div class="pane" data-pane="files">
       <label id="drop" tabindex="0">
         <input id="file" type="file" accept=".mp4,.mkv,.mov,.webm,video/*" multiple hidden>
         <strong>Drop video files here</strong>
-        <span class="muted">or click to choose · .mp4 .mkv .mov .webm · several at once is fine</span>
+        <span class="muted">or click to choose · .mp4 .mkv .mov .webm</span>
       </label>
       <ul id="picked"></ul>
+      <small class="hint">Processing starts as soon as each file is copied in.</small>
     </div>
+
+    <div class="pane" data-pane="links" hidden>
+      <div id="link-rows"></div>
+      <button type="button" id="add-link" class="ghost-add">+ Add another link</button>
+      <small class="hint">Each video downloads before it is processed: about 7 GB for a 3-hour stream at 1080p.
+        If you have the recording as a file, adding it under Video files is faster.</small>
+    </div>
+
     <div class="dlg-foot">
       <span class="muted small" id="add-summary">Nothing added yet</span>
       <div class="spacer"></div>
       <button value="cancel">Cancel</button>
-      <button id="add-go" class="primary" value="default" disabled>Add</button>
+      <button id="add-go" class="primary" value="default" disabled>Process VODs</button>
     </div>
   </form>
 </dialog>
@@ -156,6 +168,6 @@
 <div id="menu" class="menu" hidden></div>
 <div id="tip" hidden></div>
 <div id="toast" hidden></div>
-<script src="app.js?v=10"></script>
+<script src="app.js?v=11"></script>
 </body>
 </html>

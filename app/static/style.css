@@ -83,6 +83,17 @@ kbd { font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; padding: 1px 5p
 .qrow .bar { max-width: 520px; }
 .qrow.downloading .bar > div { background: var(--pre); }
 .q-right { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; }
+/* the four steps every VOD goes through */
+.stepper { list-style: none; display: flex; flex-wrap: wrap; gap: 4px 6px; margin: 5px 0 3px; padding: 0; font-size: 12px; }
+.stepper li { display: inline-flex; align-items: center; gap: 6px; color: var(--faint); }
+.stepper li + li::before { content: ""; order: -2; width: 14px; height: 1px; background: var(--line2); margin-right: 2px; }
+.stepper li::after { content: ""; order: -1; width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--line2); box-sizing: border-box; }
+.stepper li.done { color: var(--muted); }
+.stepper li.done::after { background: var(--win); border-color: var(--win); }
+.stepper li.on { color: var(--text); font-weight: 600; }
+.stepper li.on::after { border-color: var(--accent); background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
+.stepper li.next { color: var(--muted); }
+.stepper li.next::after { border-color: var(--post); }
 .q-actions { display: inline-flex; gap: 6px; }
 .q-cancel { font-size: 13px; opacity: .55; }
 .qrow:hover .q-cancel { opacity: 1; }
@@ -110,18 +121,20 @@ kbd { font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; padding: 1px 5p
 .card .rename { width: 100%; }
 mark { background: color-mix(in srgb, var(--accent) 30%, transparent); color: inherit; border-radius: 3px; }
 
-#welcome { max-width: 560px; margin: 12vh auto 0; text-align: center; }
-#welcome p { margin: 0 0 22px; }
-#welcome .small { margin-top: 14px; }
+#welcome { max-width: 620px; margin: 12vh auto 0; text-align: center; }
+#welcome p { margin: 0 0 26px; line-height: 1.55; }
+.choices { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.choice { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; text-align: left; padding: 18px 18px 16px; border-radius: 14px; background: var(--panel); border: 1px solid var(--line2); white-space: normal; }
+.choice:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--panel)); }
+.choice b { font-size: 16px; }
+.choice span { color: var(--muted); font-size: 13px; line-height: 1.4; }
+.choice em { position: absolute; top: 14px; right: 14px; }
+@media (max-width: 700px) { .choices { grid-template-columns: 1fr; } }
 
 /* ---------- add dialog ---------- */
 dialog { background: var(--panel); color: var(--text); border: 1px solid var(--line2); border-radius: 16px; padding: 0; width: min(560px, calc(100vw - 32px)); box-shadow: var(--shadow); }
 dialog::backdrop { background: rgba(4, 6, 10, .65); backdrop-filter: blur(3px); }
 #add-form { padding: 18px 20px 18px; display: flex; flex-direction: column; gap: 16px; max-height: calc(100vh - 40px); overflow-y: auto; }
-.steps { list-style: none; counter-reset: step; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 0; padding: 0; }
-.steps li { counter-increment: step; background: var(--panel2); border-radius: 10px; padding: 9px 10px 9px 38px; position: relative; font-size: 12.5px; line-height: 1.35; color: var(--muted); }
-.steps li::before { content: counter(step); position: absolute; left: 10px; top: 9px; width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 700; background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent); }
-.steps b { color: var(--text); font-weight: 600; display: block; }
 .label { font-weight: 600; font-size: 13px; }
 #link-rows { display: flex; flex-direction: column; gap: 6px; }
 .l-in { display: flex; align-items: center; gap: 6px; position: relative; }
@@ -135,7 +148,17 @@ dialog::backdrop { background: rgba(4, 6, 10, .65); backdrop-filter: blur(3px); 
 .l-msg:empty { display: none; }
 .ghost-add { align-self: flex-start; background: transparent; border: 1px dashed var(--line2); color: var(--accent); padding: 5px 12px; font-size: 13px; }
 .ghost-add:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
-.dlg-head { display: flex; align-items: center; justify-content: space-between; }
+.dlg-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.dlg-head p { margin: 4px 0 0; }
+/* files or links: one tab each, both feed the same list */
+.tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 3px; }
+.tabs button { border: 0; background: transparent; color: var(--muted); border-radius: 8px; padding: 7px 10px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.tabs button:hover { color: var(--text); background: transparent; }
+.tabs button.on { background: var(--panel3); color: var(--text); }
+.tabs em, .choice em { font-style: normal; font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--win); background: color-mix(in srgb, var(--win) 14%, transparent); border-radius: 99px; padding: 1px 7px; }
+.tabs .count { min-width: 18px; font-size: 11px; padding: 0 6px; border-radius: 99px; background: var(--accent); color: var(--accent-ink); }
+.tabs .count:empty { display: none; }
+.pane { display: flex; flex-direction: column; gap: 8px; }
 #drop { display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center; padding: 26px 14px; border: 1.5px dashed var(--line2); border-radius: var(--radius); cursor: pointer; transition: .15s; }
 #drop span { font-size: 12.5px; }
 #drop:hover, #drop.over { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, transparent); }
@@ -287,7 +310,6 @@ button.danger-solid:hover { filter: brightness(1.08); background: var(--danger);
   #search-wrap { margin-left: 0; flex: 1; }
   #search-wrap kbd, .keys { display: none; }
   #library-view, #viewer-view { padding: 16px; }
-  .steps { grid-template-columns: 1fr; }
   .qrow { grid-template-columns: 30px minmax(0, 1fr) 30px; }
   .q-right { grid-column: 2; grid-row: 2; }
   #v-meta { display: none; }

@@ -149,6 +149,26 @@ $("#activity").onclick = () => { location.hash = "#/"; };
 const DOWNLOADING = /download|youtube|joining/i;   // processing stages that are still fetching the video
 const toDownload = (v) => v.status === "queued" && /^waiting to download/i.test(v.stage || "");
 
+// Every VOD goes through four steps; the bar and percentage are for the current one, so a
+// finished download reads "step 1 of 4 done" rather than "ready".
+const STEPS = { youtube: ["Download", "Scan video", "Find rounds", "Results"], file: ["Copy in", "Scan video", "Find rounds", "Results"] };
+const clamp = (x) => Math.max(0, Math.min(100, x));
+function stepOf(j) {
+  const st = j.stage || "";
+  if (j.upload) return { i: 0, pct: j.pct, text: "Copying the file into the app" };
+  if (j.status === "queued") return toDownload(j) ? { i: 0, wait: true, text: "Waiting for a download slot" } : { i: 1, wait: true };
+  if (DOWNLOADING.test(st) || /contacting/i.test(st)) {
+    const details = st.split(" · ").slice(1).join(" · ");
+    return { i: 0, pct: /joining/i.test(st) ? 100 : clamp(j.pct), text: /contacting/i.test(st) ? "Contacting YouTube"
+      : /joining/i.test(st) ? "Joining video and audio" : `Downloading${/audio/i.test(st) ? " audio" : ""}${details ? ` · ${details}` : ""}` };
+  }
+  if (/round results|building/i.test(st)) return { i: 3, pct: clamp(((j.pct - 95) / 5) * 100), text: "Building the round list and reading round results" };
+  if (/reading the hud/i.test(st)) return { i: 2, pct: clamp(((j.pct - 85) / 10) * 100), text: "Reading the timer and score in each frame" };
+  return { i: 1, pct: clamp((j.pct / 85) * 100), text: `Scanning the video${/gpu/i.test(st) ? " (GPU)" : ""}` };
+}
+const stepper = (steps, i, wait) => el("ol", { class: "stepper" }, ...steps.map((label, k) =>
+  el("li", { class: k < i ? "done" : k === i ? (wait ? "next" : "on") : "" }, label)));
+
 let jobsKey = "";
 function renderJobs() {
   const byAdded = (a, b) => a.created_at - b.created_at;
@@ -171,14 +191,15 @@ function renderJobs() {
   $("#jobs-title").textContent = active.length ? "Processing queue" : failed.length ? "Needs attention" : "Just finished";
   $("#jobs-note").textContent = active.length
     ? [running && `${running} processing`, dl && `${dl} downloading`, waiting.length && `${waiting.length} waiting`, ups.length && `${ups.length} uploading`]
-      .filter(Boolean).join(" · ") + ` — processed in the order added, ${config.parallel} at a time; YouTube links join once downloaded`
+      .filter(Boolean).join(" · ") + ` · in the order added, ${config.parallel} at a time`
     : "";
 
   let n = 0;
-  const row = (j, num, cls, stage, right, pct, bar) => el("div", { class: `qrow ${cls}` },
+  const row = (j, num, cls, stage, right, pct, bar, steps = null) => el("div", { class: `qrow ${cls}` },
     el("span", { class: "q-num" }, num),
     el("div", { class: "q-main" },
       el("div", { class: "q-name", title: j.name }, j.name),
+      steps,
       el("div", { class: "q-stage", title: stage }, stage),
       bar ? el("div", { class: "bar" + (pct == null ? " wait" : "") }, el("div", { style: `width:${pct || 0}%` })) : null),
     el("div", { class: "q-right" }, right),
@@ -188,19 +209,21 @@ function renderJobs() {
   $("#jobs").replaceChildren(
     ...active.map((j) => {
       n++;
-      if (j.upload) {
-        return j.error ? row(j, "!", "failed", j.error, "", null, false)
-          : row(j, `#${n}`, "running", "Uploading to the app", `${Math.round(j.pct)}%`, j.pct, true);
+      if (j.upload && j.error) return row(j, "!", "failed", j.error, "", null, false);
+      const steps = STEPS[j.source_url ? "youtube" : "file"];
+      const st = stepOf(j);
+      const where = `Step ${st.i + 1} of ${steps.length}`;
+      if (st.wait) {
+        let text = st.text;
+        if (!text) {
+          const ahead = waiting.indexOf(j);
+          text = ahead <= 0 ? "Up next, starts when a slot frees up" : `Waiting, ${plural(ahead, "VOD")} ahead`;
+        }
+        return row(j, `#${n}`, "waiting", `${where} · ${text}`,
+          el("span", { class: "tag" }, /up next/i.test(text) ? "Up next" : "Queued"), null, false, stepper(steps, st.i, true));
       }
-      if (j.status === "processing") {
-        const what = DOWNLOADING.test(j.stage) ? "downloading" : "running";
-        return row(j, `#${n}`, what, j.stage || "Starting", `${Math.round(j.pct)}%`, j.pct, true);
-      }
-      if (toDownload(j)) return row(j, `#${n}`, "waiting", "Waiting for a download slot", el("span", { class: "tag" }, "Queued"), null, false);
-      const ahead = waiting.indexOf(j);
-      const got = /^downloaded/i.test(j.stage || "") ? "Downloaded · " : "";
-      const where = ahead <= 0 ? `${got}Up next — starts when a slot frees up` : `${got}Waiting — ${plural(ahead, "VOD")} ahead`;
-      return row(j, `#${n}`, "waiting", where, el("span", { class: "tag" }, ahead <= 0 ? "Up next" : "Queued"), null, false);
+      const cls = st.i === 0 && !j.upload ? "downloading" : "running";
+      return row(j, `#${n}`, cls, `${where} · ${st.text}`, `${Math.round(st.pct)}%`, st.pct, true, stepper(steps, st.i, false));
     }),
     ...failed.map((j) => row(j, "!", "failed", j.error || "Processing failed", el("span", { class: "q-actions" },
       el("button", { onclick: () => reprocess(j) }, "Retry"),
@@ -237,7 +260,9 @@ function renderGrid() {
   const ready = vods.filter((v) => v.status === "ready");
   const shown = sortVods(ready.filter((v) => !q || v.name.toLowerCase().includes(q)));
   $("#lib-count").textContent = ready.length ? (q ? `${shown.length} of ${ready.length}` : `${ready.length}`) : "";
-  $("#no-match").hidden = !(q && ready.length && !shown.length);
+  const empty = !shown.length && (q ? ready.length > 0 : true);
+  $("#no-match").hidden = !empty;
+  $("#no-match").textContent = q ? "No VODs match your search." : "Your VODs appear here as each one finishes processing.";
   const key = JSON.stringify([q, $("#sort").value, shown.map((v) => [v.id, v.name, v.duration, v.summary])]);
   if (key === gridKey) return;
   gridKey = key;
@@ -346,15 +371,28 @@ async function removeVod(v) {
 let picked = [];
 let links = [""];
 const dlg = $("#add-dialog");
-function openAdd(files = []) {
+function openAdd(files = [], tab = "files") {
   picked = [...files];
   links = [""];
   renderAdd();
+  setTab(files.length ? "files" : tab);
   if (!dlg.open) dlg.showModal();
-  if (!files.length) $("#link-rows input")?.focus();
+  if (addTab === "links") $("#link-rows input")?.focus();
+}
+
+// files or YouTube links: one tab each, both feed the same list
+let addTab = "files";
+function setTab(tab) {
+  addTab = tab;
+  for (const b of document.querySelectorAll("#add-form .tabs button")) b.classList.toggle("on", b.dataset.tab === tab);
+  for (const pane of document.querySelectorAll("#add-form .pane")) pane.hidden = pane.dataset.pane !== tab;
+}
+for (const b of document.querySelectorAll("#add-form .tabs button")) {
+  b.addEventListener("click", () => { setTab(b.dataset.tab); if (b.dataset.tab === "links") $("#link-rows input")?.focus(); });
 }
 $("#add-btn").onclick = () => openAdd();
-$("#welcome-add").onclick = () => openAdd();
+$("#welcome-files").onclick = () => openAdd([], "files");
+$("#welcome-links").onclick = () => openAdd([], "links");
 
 function linkState(i) {
   const v = links[i].trim();
@@ -423,10 +461,12 @@ function updateAddSummary() {
   const nf = picked.length, nl = goodLinks().length, n = nf + nl, bad = badLinks();
   const parts = [nf && plural(nf, "file"), nl && plural(nl, "link")].filter(Boolean);
   $("#add-summary").textContent = bad ? "Fix or remove the links marked in red"
-    : n ? `${parts.join(" and ")} — processed in this order, ${config.parallel} at a time` : "Nothing added yet";
+    : n ? `${parts.join(" and ")} ready` : "Add files or links to get started";
+  $("#count-files").textContent = nf || "";
+  $("#count-links").textContent = nl || "";
   const go = $("#add-go");
   go.disabled = !n || bad > 0;
-  go.textContent = n ? `Add ${n} to the queue` : "Add to the queue";
+  go.textContent = n ? `Process ${plural(n, "VOD")}` : "Process VODs";
 }
 
 $("#file").addEventListener("change", (e) => { addPicked(e.target.files); e.target.value = ""; });
@@ -447,7 +487,7 @@ $("#add-form").addEventListener("submit", (e) => {
   picked = []; links = [""];
   location.hash = "#/";
   const n = files.length + urls.length;
-  toast(`Added ${plural(n, "VOD")} to the queue. ${n > 1 ? "They process in the order added and each" : "It"} opens from your library when ready.`);
+  toast(`Processing ${plural(n, "VOD")}. ${n > 1 ? "Each one appears" : "It appears"} in your library when ready.`);
   ingest(files, urls);
 });
 
