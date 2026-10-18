@@ -12,11 +12,52 @@ chapter covers the engineering around the pipeline.
 - **SQLite** (`data/library.db`) holds one row per VOD: name, status (`queued`, `processing`,
   `ready`, `failed`), current stage and percentage, error, source URL, dates. Results live in files
   (`segments.json`), not the database.
-- **No frontend build step**: plain HTML, CSS and JavaScript. The page polls `GET /api/vods` every
-  2 seconds; no websockets.
+- **No frontend build step**: plain HTML, CSS and JavaScript.
 
-Polling every 2 s is deliberately simple: there is one user, the payload is a few KB, and it makes
-reconnecting after a restart trivial.
+## How the page and the server talk
+
+Three kinds of traffic:
+
+| Kind | When | Requests |
+|---|---|---|
+| **Actions** | you click something | `POST /api/vods` (upload), `POST /api/vods/from-url`, `PATCH /api/vods/{id}` (rename), `POST /api/vods/{id}/reprocess`, `DELETE /api/vods/{id}` |
+| **Reads** | you look at something | `GET /api/vods/{id}` (a VOD's breakdown, once when opened), `GET /api/vods/{id}/video` (range requests while playing), `GET /api/vods/{id}/thumb.jpg` |
+| **Status poll** | on a timer | `GET /api/vods`: every VOD's status, step, percentage, summary and dates |
+
+After an action the page refreshes at once rather than waiting for the poll. The poll exists for
+changes **the server makes on its own**: a download or analysis progressing, finishing or failing,
+and background upgrades of older VODs. The server has no way to tell the page about those, so the
+page asks.
+
+### The polling schedule
+
+| Situation | Check every |
+|---|---|
+| something is uploading, queued or processing | 2 s |
+| nothing in progress | 15 s (background updates still arrive) |
+| the tab is hidden | not at all; one check as soon as it is visible again |
+| the app is not answering | 1 s, with a "Lost contact… reconnecting" banner |
+
+Adding a VOD switches to the 2-second rhythm at once. One check returns ~1.4 KB and takes the
+server ~3 ms with three VODs, all on the same machine. The trade-off of the idle rhythm: if the app
+is closed while the page sits idle, the banner can take up to 15 s to appear.
+
+### Why polling and not push
+
+The alternative is a long-lived connection over which the server pushes changes (Server-Sent Events
+or WebSockets). For a single local user with jobs that take minutes, polling wins:
+
+- **simpler**: an ordinary request on a timer, no connection to keep alive or re-establish;
+- **restarts are free**: after the app restarts, the next check simply works;
+- **fast enough**: progress every 2 s is plenty.
+
+What would change the answer: many users, large libraries, or anything that must feel instant (for
+example several people editing notes on the same round). Then: server push, or at least "nothing
+changed" responses (ETag / `304 Not Modified`) and changes-since queries instead of the full list.
+
+> Lesson: polling is a legitimate design for single-user, slowly changing state. Make it adaptive
+> (fast while work is running, slow when idle, paused when nobody is looking) and refresh at once
+> after the user's own actions.
 
 ## Job pools: parallel, ordered, isolated
 

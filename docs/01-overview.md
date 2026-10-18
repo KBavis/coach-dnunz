@@ -54,7 +54,9 @@ flowchart LR
         YT[yt-dlp<br/>download]
         P[pipeline.run<br/>scan, read, segment, results]
     end
-    UI -- HTTP polling --> API
+    UI -- "actions: add, rename, re-run, delete<br/>(POST, PATCH, DELETE)" --> API
+    UI -- "reads: breakdown, video, thumbnails<br/>(GET)" --> API
+    UI -. "status poll: GET /api/vods<br/>(2 s busy, 15 s idle)" .-> API
     API --> DB
     API --> Jobs
     Jobs -- subprocess --> YT
@@ -63,7 +65,10 @@ flowchart LR
     API -- reads --> Files
 ```
 
-- **Frontend** (`app/static`): plain HTML/CSS/JS, no build step. Polls the API every 2 seconds.
+- **Frontend** (`app/static`): plain HTML/CSS/JS, no build step. It talks to the server in three
+  ways: **actions** when you click something (add, rename, re-run, delete), **reads** when you look
+  at something (a VOD's breakdown, the video itself, thumbnails), and a **status poll** that catches
+  up on work the server does on its own (downloads, analyses, background updates). See chapter 6.
 - **Web app** (`app/main.py`, `app/jobs.py`, `app/db.py`): FastAPI serves the API, the video files
   (with HTTP range requests, so seeking works) and the frontend. Job pools run downloads and
   analyses.
@@ -71,7 +76,7 @@ flowchart LR
   crash or a memory spike cannot take the web app down.
 - **Launcher** (`launch.py`, `start.*`): one-command setup and start; a tray app on Windows.
 
-## The life of one VOD
+## The life of one VOD: adding it
 
 ```mermaid
 sequenceDiagram
@@ -90,6 +95,31 @@ sequenceDiagram
     P-->>A: segments.json, progress.json along the way
     A-->>C: "Ready" -> open the viewer
 ```
+
+## Reviewing a VOD
+
+Once a VOD is processed, reviewing it barely involves the server beyond streaming the video:
+
+```mermaid
+sequenceDiagram
+    participant C as Coach
+    participant B as Browser
+    participant A as Web app
+    C->>B: Open a VOD from the library
+    B->>A: GET /api/vods/{id}
+    A-->>B: the breakdown (games, rounds, phases, results), once
+    B->>A: GET /api/vods/{id}/video (HTTP range requests)
+    A-->>B: video data, in pieces as it plays
+    C->>B: Click round 7, its post-plant, or the round clock
+    Note over B: just a seek in the video: no server request,<br/>beyond fetching the video piece for the new position
+    C->>B: Skip dead time / step rounds with [ ]
+    Note over B: all done in the page from the breakdown it already has
+```
+
+Everything interactive in the viewer (which round you are in, the phase buttons, the round clock,
+skipping dead time) is computed in the browser from the breakdown it fetched once.
+
+## Cost per step
 
 Per-step cost for the 1h45m sample (about 148 s in total):
 

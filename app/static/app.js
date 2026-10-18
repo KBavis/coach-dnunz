@@ -119,6 +119,24 @@ function setConnected(ok) {
   if (ok && first) route();                       // now there is something to show
 }
 
+// How often the page asks the server for the library: often while something is in progress, rarely
+// when idle (background updates such as round results still arrive), never while the tab is hidden.
+const POLL_BUSY = 2000, POLL_IDLE = 15000, POLL_OFFLINE = 1000;
+const busy = () => uploads.size > 0 || vods.some((v) => v.status === "processing" || v.status === "queued");
+const pollDelay = () => (!connected ? POLL_OFFLINE : busy() ? POLL_BUSY : POLL_IDLE);
+let pollTimer = null, pollEvery = null;
+function schedulePoll() {
+  clearTimeout(pollTimer);
+  pollEvery = null;
+  if (document.hidden || connected === null) return;      // hidden: resume on return; not yet up: init() retries
+  pollEvery = pollDelay();
+  pollTimer = setTimeout(async () => { await refresh(); schedulePoll(); }, pollEvery);
+}
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) { clearTimeout(pollTimer); pollEvery = null; return; }
+  refresh().then(schedulePoll);                            // back on the tab: catch up at once
+});
+
 async function refresh() {
   let list;
   try { list = await api("/api/vods"); } catch (_) {
@@ -139,6 +157,7 @@ async function refresh() {
   lastStatus = new Map(list.map((v) => [v.id, v.status]));
   vods = list;
   renderLibrary();
+  if (pollEvery !== null && pollEvery !== pollDelay()) schedulePoll();
   // the breakdown being viewed changed on the server (round results added, re-run finished)
   const mine = current && list.find((v) => v.id === current.id);
   if (view === "viewer" && mine?.status === "ready" && mine.updated && mine.updated !== current.updated) reloadCurrent();
@@ -543,6 +562,7 @@ function upload(file) {
   const key = `${file.name}:${file.size}:${Math.random()}`;
   uploads.set(key, { name: file.name, pct: 0 });
   renderLibrary();
+  if (pollEvery !== null && pollEvery !== pollDelay()) schedulePoll();
   return new Promise((resolve) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", "/api/vods");
@@ -1009,7 +1029,7 @@ document.addEventListener("keydown", (e) => {
 
 /* ---------- boot ---------- */
 (async function init() {
-  // poll quickly until the app answers (it may still be starting), then every 2 s
+  // ask every second until the app answers (it may still be starting), then on the normal schedule
   let wait = 0;
   while (connected !== true) {
     await refresh();
@@ -1018,5 +1038,5 @@ document.addEventListener("keydown", (e) => {
     await new Promise((r) => setTimeout(r, 1000));
   }
   try { config = await api("/api/config"); } catch (_) {}
-  (function poll() { setTimeout(async () => { await refresh(); poll(); }, connected ? 2000 : 1000); })();
+  schedulePoll();
 })();
