@@ -1,5 +1,9 @@
 # Setting up Coach Dnunz
 
+> **This guide is for people who just want to use the app on Windows**, no technical knowledge
+> needed. Developers: see the [README](README.md) for running and working on the code, and
+> [docs/](docs/README.md) for how it all works.
+
 Coach Dnunz breaks a Valorant match recording into games and rounds so you can jump straight to
 any round, and to its buy phase, live round, plant or round end. It runs entirely on your own
 computer. These steps are for Windows. Nothing needs to be installed beforehand.

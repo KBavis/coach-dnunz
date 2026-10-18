@@ -1,7 +1,8 @@
 # Coach Dnunz
 
-> **Setting it up to use it, not to work on it?** Follow **[SETUP.md](SETUP.md)**: plain-language
-> steps for Windows, no technical knowledge needed.
+> **Just want to use it?** [SETUP.md](SETUP.md) is the plain-language, non-technical guide for
+> Windows. **Want to understand how it works?** [docs/](docs/README.md) is the in-depth technical
+> write-up: video decoding, reading the HUD, the state machine, results, the app and packaging.
 
 A local-first Valorant VOD reviewer, built to help a friend who coaches. A match recording is
 split into games, rounds and the phases inside each round (buy phase, live, post-plant, round
@@ -144,7 +145,8 @@ To register an already-processed VOD without copying it:
 - `pipeline/`: scanning, HUD reading, segmentation, round results
 - `app/`: FastAPI backend, job pools, SQLite library, static frontend
 - `launch.py`, `start.sh`, `start.bat`, `start.ps1`: one-command start, Windows tray app and shortcuts
-- `SETUP.md`: non-technical setup guide
+- `SETUP.md`: non-technical setup guide (for users, not developers)
+- `docs/`: in-depth technical documentation
 
 Recording tip: in OBS you can record the mic, Discord and game audio as separate tracks in one
 file, which will make transcription and speaker separation far easier later.
